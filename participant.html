@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#09090b">
+<title>포커 게임 참가</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; margin: 0; background: #09090b; color: #fafafa; font-family: system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif; }
+  body { display: flex; justify-content: center; padding: max(28px, env(safe-area-inset-top)) 20px max(28px, env(safe-area-inset-bottom)); }
+  main { width: 100%; max-width: 430px; display: flex; flex-direction: column; justify-content: center; }
+  .eyebrow { color: #fbbf24; font-size: 13px; font-weight: 800; letter-spacing: .18em; }
+  h1 { margin: 10px 0 8px; font-size: clamp(34px, 10vw, 48px); line-height: 1.05; }
+  .sub { color: #a1a1aa; margin: 0 0 30px; line-height: 1.55; }
+  .card { background: #18181b; border: 1px solid #303036; border-radius: 20px; padding: 22px; box-shadow: 0 18px 50px rgba(0,0,0,.35); }
+  label { display: block; color: #d4d4d8; font-size: 14px; margin-bottom: 9px; }
+  input { width: 100%; min-height: 54px; border: 1px solid #3f3f46; border-radius: 12px; background: #0f0f12; color: white; padding: 0 16px; font: inherit; font-size: 18px; outline: none; }
+  input:focus { border-color: #fbbf24; box-shadow: 0 0 0 3px rgba(251,191,36,.12); }
+  button { width: 100%; min-height: 56px; margin-top: 14px; border: 0; border-radius: 12px; background: #fbbf24; color: #181000; font: inherit; font-size: 17px; font-weight: 800; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .secondary { background: #27272a; color: #fafafa; border: 1px solid #3f3f46; }
+  #player-view { display: none; text-align: center; }
+  .name { font-size: 30px; font-weight: 800; overflow-wrap: anywhere; }
+  .count { margin: 20px 0 4px; font-size: 64px; font-weight: 900; color: #fbbf24; font-variant-numeric: tabular-nums; }
+  .count-label { color: #a1a1aa; }
+  #status { min-height: 24px; margin-top: 18px; color: #a1a1aa; text-align: center; font-size: 14px; }
+  #status.error { color: #f87171; }
+  #room-label { color: #71717a; margin-top: 24px; text-align: center; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">HOME POKER NIGHT</div>
+  <h1>게임 참가</h1>
+  <p class="sub">닉네임으로 참가한 뒤, 이 화면에서 직접 리바인할 수 있어요.</p>
+  <section class="card">
+    <div id="join-view">
+      <label for="nickname">이름 또는 닉네임</label>
+      <input id="nickname" maxlength="20" autocomplete="nickname" placeholder="예: 포커왕" autofocus>
+      <button id="join-btn">참가하기</button>
+    </div>
+    <div id="player-view">
+      <div class="name" id="player-name"></div>
+      <div class="count" id="buyin-count">1</div>
+      <div class="count-label">현재 바인 횟수</div>
+      <button id="rebuy-btn">리바인</button>
+      <button id="refresh-btn" class="secondary">정보 새로고침</button>
+    </div>
+    <div id="status">게임 방을 확인하고 있어요…</div>
+  </section>
+  <div id="room-label"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./supabase-config.js"></script>
+<script>
+const config = window.POKER_CONFIG || {};
+const code = new URLSearchParams(location.search).get('room')?.trim().toUpperCase();
+const $ = id => document.getElementById(id);
+let db, room, player, channel;
+
+function configured() {
+  return config.supabaseUrl && config.supabaseAnonKey && !config.supabaseUrl.includes('YOUR_PROJECT') && !config.supabaseAnonKey.includes('YOUR_');
+}
+function status(message, error = false) {
+  $('status').textContent = message;
+  $('status').classList.toggle('error', error);
+}
+function showPlayer() {
+  $('join-view').style.display = 'none';
+  $('player-view').style.display = 'block';
+  $('player-name').textContent = player.name;
+  $('buyin-count').textContent = player.buyin;
+  status('중앙 화면과 연결됨');
+}
+async function fetchPlayer(userId) {
+  const { data, error } = await db.from('poker_players').select('*').eq('room_id', room.id).eq('user_id', userId).maybeSingle();
+  if (error) throw error;
+  player = data;
+  if (player) showPlayer(); else status('닉네임을 입력해 참가하세요.');
+}
+async function init() {
+  $('room-label').textContent = code ? `ROOM ${code}` : '';
+  if (!code) return status('QR코드의 게임 방 정보가 없습니다.', true);
+  if (!configured()) return status('아직 Supabase 연결 설정이 완료되지 않았습니다.', true);
+  try {
+    db = supabase.createClient(config.supabaseUrl, config.supabaseAnonKey);
+    const { data: existing } = await db.auth.getSession();
+    let user = existing.session?.user;
+    if (!user) {
+      const { data: auth, error: authError } = await db.auth.signInAnonymously();
+      if (authError) throw authError;
+      user = auth.user;
+    }
+    const { data, error } = await db.from('poker_rooms').select('*').eq('code', code).maybeSingle();
+    if (error) throw error;
+    if (!data) return status('존재하지 않는 게임 방입니다.', true);
+    room = data;
+    if (!room.is_open) status('참가가 마감된 게임입니다.', true);
+    await fetchPlayer(user.id);
+    channel = db.channel(`participant-${room.id}-${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'poker_players', filter: `room_id=eq.${room.id}` }, payload => {
+        const changed = payload.new;
+        if (changed && player && changed.id === player.id) { player = changed; showPlayer(); }
+      }).subscribe();
+  } catch (error) { status(`연결 실패: ${error.message}`, true); }
+}
+$('join-btn').addEventListener('click', async () => {
+  const name = $('nickname').value.trim();
+  if (!room || !room.is_open) return status('현재 참가할 수 없는 게임입니다.', true);
+  if (!name) return status('닉네임을 입력해주세요.', true);
+  $('join-btn').disabled = true;
+  try {
+    const { count, error: countError } = await db.from('poker_players')
+      .select('id', { count: 'exact', head: true }).eq('room_id', room.id);
+    if (countError) throw countError;
+    if (count >= 9) throw new Error('이 게임은 최대 9명까지 참가할 수 있습니다.');
+    const { data: auth } = await db.auth.getUser();
+    const { data, error } = await db.from('poker_players').insert({ room_id: room.id, user_id: auth.user.id, name, buyin: 1 }).select().single();
+    if (error) throw error;
+    player = data; showPlayer();
+  } catch (error) { status(`참가 실패: ${error.message}`, true); }
+  finally { $('join-btn').disabled = false; }
+});
+$('nickname').addEventListener('keydown', e => { if (e.key === 'Enter') $('join-btn').click(); });
+$('rebuy-btn').addEventListener('click', async () => {
+  if (!player || !confirm(`리바인할까요?\n확인하면 바인 횟수가 ${player.buyin + 1}회가 됩니다.`)) return;
+  $('rebuy-btn').disabled = true;
+  try {
+    const next = player.buyin + 1;
+    const { data, error } = await db.from('poker_players').update({ buyin: next }).eq('id', player.id).select().single();
+    if (error) throw error;
+    player = data; showPlayer(); status('리바인이 반영되었습니다.');
+  } catch (error) { status(`리바인 실패: ${error.message}`, true); }
+  finally { $('rebuy-btn').disabled = false; }
+});
+$('refresh-btn').addEventListener('click', async () => {
+  try { const { data } = await db.auth.getUser(); await fetchPlayer(data.user.id); }
+  catch (error) { status(`새로고침 실패: ${error.message}`, true); }
+});
+init();
+</script>
+</body>
+</html>

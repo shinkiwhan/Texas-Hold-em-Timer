@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>Poker Blind Timer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: #000;
+    color: #fff;
+    font-family: 'Helvetica Neue', Arial, 'Apple SD Gothic Neo', sans-serif;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    height: 100dvh; /* 모바일 주소창 대응 */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  #level-label {
+    font-size: clamp(14px, 3vw, 32px);
+    letter-spacing: 0.3em;
+    color: #888;
+    margin-bottom: 2vh;
+    text-transform: uppercase;
+  }
+
+  #timer {
+    font-size: clamp(80px, 28vw, 360px);
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  #blinds {
+    font-size: clamp(28px, 8vw, 110px);
+    margin-top: 2vh;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+  }
+
+  #next {
+    font-size: clamp(12px, 2.2vw, 24px);
+    color: #666;
+    margin-top: 3vh;
+    letter-spacing: 0.1em;
+    text-align: center;
+    padding: 0 16px;
+  }
+
+  body.break #timer { color: #ffcc33; }
+  body.break #blinds { color: #ffcc33; font-size: clamp(32px, 9vw, 130px); }
+  body.break #level-label { color: #ffcc33; }
+
+  body.warning #timer { color: #ff4444; }
+
+  #controls {
+    position: fixed;
+    top: max(12px, env(safe-area-inset-top));
+    left: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 100;
+  }
+  .controls-row {
+    display: flex;
+    gap: 8px;
+  }
+  button {
+    background: #1a1a1a;
+    color: #fff;
+    border: 1px solid #555;
+    padding: 12px 18px;
+    font-size: 15px;
+    font-weight: 500;
+    border-radius: 8px;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    transition: background 0.15s, border-color 0.15s;
+    min-height: 44px; /* 터치 타겟 */
+  }
+  button:hover { background: #333; border-color: #888; }
+  button:active { background: #444; }
+
+  #btn-start { min-width: 110px; }
+  #btn-start.running { background: #5a2020; border-color: #883333; }
+
+  #btn-reset { background: #2a1a1a; }
+
+  #btn-fullscreen {
+    position: fixed;
+    top: max(12px, env(safe-area-inset-top));
+    right: 12px;
+    z-index: 100;
+  }
+
+  #level-counter {
+    position: fixed;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    left: 16px;
+    font-size: 14px;
+    color: #555;
+    letter-spacing: 0.1em;
+  }
+
+  /* 플레이어 패널 */
+  #players-panel {
+    position: fixed;
+    bottom: max(12px, env(safe-area-inset-bottom));
+    right: 16px;
+    width: 320px;
+    max-width: 40vw;
+    max-height: 60vh;
+    background: rgba(20, 20, 20, 0.85);
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 14px;
+    z-index: 90;
+    display: flex;
+    flex-direction: column;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  #players-panel.collapsed .panel-body { display: none; }
+  #players-panel.collapsed { width: auto; }
+
+  #players-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #ddd;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+    cursor: pointer;
+    gap: 8px;
+  }
+  #players-header-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+  #players-count { color: #ffcc33; }
+  #total-buyin {
+    font-size: 13px;
+    color: #4ade80;
+    font-weight: 500;
+  }
+
+  /* 칩 설정 칸 */
+  #chip-config {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .chip-config-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #bbb;
+  }
+  .chip-label {
+    min-width: 56px;
+    color: #999;
+  }
+  .chip-config-row input {
+    flex: 1;
+    min-width: 0;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    color: #fff;
+    padding: 6px 8px;
+    border-radius: 5px;
+    font-size: 14px;
+    font-family: inherit;
+    text-align: right;
+    -moz-appearance: textfield;
+  }
+  .chip-config-row input::-webkit-outer-spin-button,
+  .chip-config-row input::-webkit-inner-spin-button {
+    -webkit-appearance: none; margin: 0;
+  }
+  .chip-config-row input:focus { outline: none; border-color: #888; }
+  .chip-unit { color: #888; font-size: 12px; min-width: 50px; }
+
+  #total-chip {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid #2a2a2a;
+    font-size: 14px;
+    color: #ddd;
+    font-weight: 600;
+    text-align: center;
+  }
+  #total-chip-value { color: #60a5fa; font-size: 16px; }
+  #players-toggle {
+    background: transparent;
+    border: none;
+    color: #888;
+    font-size: 18px;
+    padding: 0 4px;
+    min-height: auto;
+    cursor: pointer;
+  }
+
+  .panel-body {
+    overflow-y: auto;
+    flex: 1;
+    max-height: calc(60vh - 60px);
+  }
+  .panel-body::-webkit-scrollbar { width: 6px; }
+  .panel-body::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+
+  .player-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .player-row input.name {
+    flex: 1;
+    min-width: 0;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    color: #fff;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .player-row input.name:focus { outline: none; border-color: #888; }
+  .player-row .buyin {
+    min-width: 36px;
+    text-align: center;
+    color: #ffcc33;
+    font-weight: 600;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  .player-row button.pm {
+    background: #1a1a1a;
+    border: 1px solid #555;
+    color: #fff;
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
+    font-size: 16px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+  .player-row button.pm:active { background: #444; }
+  .player-row button.del {
+    background: transparent;
+    border: none;
+    color: #666;
+    font-size: 16px;
+    padding: 0 4px;
+    min-height: auto;
+    flex-shrink: 0;
+  }
+  .player-row button.del:hover { color: #ff6666; }
+
+  #btn-add-player {
+    width: 100%;
+    margin-top: 8px;
+    background: #1a3a1a;
+    border-color: #336633;
+    padding: 10px;
+    font-size: 14px;
+  }
+  #btn-add-player:hover { background: #2a5a2a; }
+
+  #online-room {
+    background: rgba(0,0,0,0.35);
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+  #room-actions { display: flex; gap: 6px; }
+  #btn-create-room { flex: 1; padding: 9px; min-height: 38px; font-size: 13px; background: #172554; border-color: #29458a; }
+  #room-status { color: #888; font-size: 12px; line-height: 1.45; margin-top: 7px; overflow-wrap: anywhere; }
+  #room-status.connected { color: #4ade80; }
+  #room-share { display: none; margin-top: 10px; text-align: center; }
+  #room-code { color: #facc15; font-size: 20px; font-weight: 800; letter-spacing: .18em; }
+  #qr-code { width: 148px; height: 148px; margin: 10px auto; padding: 8px; background: white; border-radius: 8px; }
+  #qr-code img, #qr-code canvas { width: 100% !important; height: 100% !important; }
+  #join-url { color: #888; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+
+  @media (max-width: 600px) {
+    #players-panel { width: 260px; max-width: 70vw; padding: 10px; }
+    .player-row input.name { font-size: 13px; padding: 6px 8px; }
+    .player-row button.pm { width: 28px; height: 28px; min-height: 28px; font-size: 14px; }
+  }
+
+  /* 모바일 세로화면 - 버튼 크기 살짝 줄이고 한 줄로 */
+  @media (max-width: 600px) {
+    button { padding: 10px 12px; font-size: 13px; }
+    #btn-start { min-width: 80px; }
+  }
+
+
+</style>
+</head>
+<body>
+
+<div id="level-counter"></div>
+
+<div id="level-label">LEVEL 1</div>
+<div id="timer">07:00</div>
+<div id="blinds">100 / 200</div>
+<div id="next">NEXT: 200 / 400</div>
+
+<div id="controls">
+  <div class="controls-row">
+    <button id="btn-start">▶ 시작</button>
+    <button id="btn-prev">◀ 이전</button>
+    <button id="btn-next">다음 ▶</button>
+    <button id="btn-reset">↻ 리셋</button>
+  </div>
+  <div class="controls-row">
+    <button id="btn-minus-min">−1분</button>
+    <button id="btn-plus-min">+1분</button>
+    <button id="btn-minus-sec">−10초</button>
+    <button id="btn-plus-sec">+10초</button>
+  </div>
+</div>
+
+<div id="players-panel">
+  <div id="online-room">
+    <div id="room-actions"><button id="btn-create-room">온라인 게임 방 만들기</button></div>
+    <div id="room-status">Supabase 연결 설정을 확인하는 중…</div>
+    <div id="room-share">
+      <div id="room-code"></div>
+      <div id="qr-code"></div>
+      <div id="join-url"></div>
+    </div>
+  </div>
+  <div id="chip-config">
+    <div class="chip-config-row">
+      <span class="chip-label">첫 바인</span>
+      <input id="chip-first" type="number" min="0" value="1" inputmode="numeric">
+      <span class="chip-unit">만 chip</span>
+    </div>
+    <div class="chip-config-row">
+      <span class="chip-label">이후 바인</span>
+      <input id="chip-rebuy" type="number" min="0" value="1" inputmode="numeric">
+      <span class="chip-unit">만 chip</span>
+    </div>
+    <div id="total-chip">Total chip count: <span id="total-chip-value">0</span>만</div>
+  </div>
+  <div id="players-header">
+    <div id="players-header-info">
+      <span>플레이어 수: <span id="players-count">0</span>명</span>
+      <span id="total-buyin">총 바인: 0원</span>
+    </div>
+    <button id="players-toggle" title="접기/펼치기">–</button>
+  </div>
+  <div class="panel-body">
+    <div id="players-list"></div>
+    <button id="btn-add-player">+ 플레이어 추가</button>
+  </div>
+</div>
+<button id="btn-fullscreen">⛶ 전체화면</button>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="./supabase-config.js"></script>
+<script>
+const LEVELS = [
+  { type: 'blind', sb: 100,   bb: 200,    minutes: 7 },
+  { type: 'blind', sb: 200,   bb: 400,    minutes: 7 },
+  { type: 'blind', sb: 300,   bb: 600,    minutes: 7 },
+  { type: 'blind', sb: 400,   bb: 800,    minutes: 7 },
+  { type: 'blind', sb: 500,   bb: 1000,   minutes: 7 },
+  { type: 'break', minutes: 5 },
+  { type: 'blind', sb: 1000,  bb: 2000,   minutes: 7 },
+  { type: 'blind', sb: 2000,  bb: 4000,   minutes: 7 },
+  { type: 'blind', sb: 3000,  bb: 6000,   minutes: 7 },
+  { type: 'blind', sb: 4000,  bb: 8000,   minutes: 7 },
+  { type: 'blind', sb: 7000,  bb: 14000,  minutes: 7 },
+  { type: 'break', minutes: 5 },
+  { type: 'blind', sb: 10000, bb: 20000,  minutes: 7 },
+  { type: 'blind', sb: 20000, bb: 40000,  minutes: 7 },
+  { type: 'blind', sb: 30000, bb: 60000,  minutes: 7 },
+  { type: 'blind', sb: 40000, bb: 80000,  minutes: 7 },
+  { type: 'blind', sb: 50000, bb: 100000, minutes: 7 },
+];
+
+let currentLevel = 0;
+let remainingMs = LEVELS[0].minutes * 60 * 1000;
+let endTime = null; // 절대 시간 기준 (화면 꺼져도 정확)
+let running = false;
+let intervalId = null;
+
+const $timer = document.getElementById('timer');
+const $blinds = document.getElementById('blinds');
+const $next = document.getElementById('next');
+const $label = document.getElementById('level-label');
+const $counter = document.getElementById('level-counter');
+const $btnStart = document.getElementById('btn-start');
+
+function fmt(n) { return n.toLocaleString('en-US'); }
+
+function getBlindNumber(idx) {
+  let n = 0;
+  for (let i = 0; i <= idx; i++) if (LEVELS[i].type === 'blind') n++;
+  return n;
+}
+
+function findNextBlind(idx) {
+  for (let i = idx + 1; i < LEVELS.length; i++) {
+    if (LEVELS[i].type === 'blind') return LEVELS[i];
+  }
+  return null;
+}
+
+let lastDisplayedSec = -1;
+
+function tick() {
+  if (running && endTime != null) {
+    remainingMs = endTime - Date.now();
+    if (remainingMs <= 0) {
+      // 레벨업 사운드
+      beep(880, 0.15);
+      setTimeout(() => beep(1175, 0.25), 180);
+      // 진동
+      vibrate([200, 100, 200]);
+      goNext();
+      return;
+    }
+  }
+
+  const total = Math.max(0, Math.ceil(remainingMs / 1000));
+
+  // 카운트다운 비프 (초가 바뀐 순간만)
+  if (running && total !== lastDisplayedSec) {
+    if (total <= 3 && total > 0) {
+      beep(880, 0.12);
+      vibrate(80);
+    }
+    lastDisplayedSec = total;
+  }
+
+  render(total);
+}
+
+function render(total) {
+  if (total == null) total = Math.max(0, Math.ceil(remainingMs / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  $timer.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+
+  const lvl = LEVELS[currentLevel];
+  if (lvl.type === 'break') {
+    document.body.classList.add('break');
+    $label.textContent = 'BREAK TIME';
+    $blinds.textContent = '☕ 휴식 ☕';
+    const nb = findNextBlind(currentLevel);
+    $next.textContent = nb ? `NEXT: ${fmt(nb.sb)} / ${fmt(nb.bb)}` : '';
+  } else {
+    document.body.classList.remove('break');
+    const num = getBlindNumber(currentLevel);
+    $label.textContent = `LEVEL ${num}`;
+    $blinds.textContent = `${fmt(lvl.sb)} / ${fmt(lvl.bb)}`;
+    const nxt = LEVELS[currentLevel + 1];
+    if (!nxt) $next.textContent = '— 마지막 레벨 —';
+    else if (nxt.type === 'break') $next.textContent = 'NEXT: BREAK (5분)';
+    else $next.textContent = `NEXT: ${fmt(nxt.sb)} / ${fmt(nxt.bb)}`;
+  }
+
+  if (total <= 3 && total > 0 && running) document.body.classList.add('warning');
+  else document.body.classList.remove('warning');
+
+  $counter.textContent = `${currentLevel + 1} / ${LEVELS.length}`;
+}
+
+function start() {
+  if (running) return;
+  unlockAudio(); // 모바일 오디오 잠금 해제
+  running = true;
+  endTime = Date.now() + remainingMs;
+  $btnStart.textContent = '⏸ 일시정지';
+  $btnStart.classList.add('running');
+  keepAwake();
+  if (intervalId) clearInterval(intervalId);
+  intervalId = setInterval(tick, 100);
+  tick();
+}
+function pause() {
+  if (!running) return;
+  remainingMs = endTime - Date.now();
+  running = false;
+  endTime = null;
+  $btnStart.textContent = '▶ 재개';
+  $btnStart.classList.remove('running');
+  if (intervalId) { clearInterval(intervalId); intervalId = null; }
+  releaseAwake();
+}
+function toggle() { running ? pause() : start(); }
+
+function goNext() {
+  if (currentLevel < LEVELS.length - 1) {
+    currentLevel++;
+    remainingMs = LEVELS[currentLevel].minutes * 60 * 1000;
+    if (running) endTime = Date.now() + remainingMs;
+  } else {
+    pause();
+    remainingMs = 0;
+  }
+  lastDisplayedSec = -1;
+  render();
+}
+function goPrev() {
+  if (currentLevel > 0) currentLevel--;
+  remainingMs = LEVELS[currentLevel].minutes * 60 * 1000;
+  if (running) endTime = Date.now() + remainingMs;
+  lastDisplayedSec = -1;
+  render();
+}
+function reset() {
+  pause();
+  currentLevel = 0;
+  remainingMs = LEVELS[0].minutes * 60 * 1000;
+  lastDisplayedSec = -1;
+  render();
+}
+
+// ===== 오디오 (모바일 대응) =====
+let audioCtx = null;
+let audioUnlocked = false;
+function unlockAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (!audioUnlocked) {
+      // 무음 한 번 재생으로 잠금 해제
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      g.gain.value = 0;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(); o.stop(audioCtx.currentTime + 0.01);
+      audioUnlocked = true;
+    }
+  } catch (e) {}
+}
+function beep(freq, dur) {
+  try {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.frequency.value = freq;
+    o.type = 'sine';
+    g.gain.value = 0.25;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start();
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    o.stop(audioCtx.currentTime + dur);
+  } catch (e) {}
+}
+function vibrate(pattern) {
+  try { if (navigator.vibrate) navigator.vibrate(pattern); } catch (e) {}
+}
+
+// ===== 화면 꺼짐 방지 (Wake Lock) =====
+let wakeLock = null;
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  } catch (e) {}
+}
+function releaseAwake() {
+  try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {}
+}
+// 탭이 다시 활성화되면 wake lock 재요청
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && running) {
+    keepAwake();
+    tick(); // 즉시 동기화
+  }
+});
+
+// ===== 이벤트 =====
+$btnStart.addEventListener('click', toggle);
+document.getElementById('btn-prev').addEventListener('click', goPrev);
+document.getElementById('btn-next').addEventListener('click', goNext);
+document.getElementById('btn-reset').addEventListener('click', () => {
+  if (confirm('정말 처음부터 다시 시작할까요?')) reset();
+});
+document.getElementById('btn-fullscreen').addEventListener('click', async () => {
+  const el = document.documentElement;
+  try {
+    if (!document.fullscreenElement) {
+      const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen;
+      if (req) await req.call(el);
+      // 전체화면 진입 후 가로 잠금 시도 (안드로이드 크롬에서 동작, iOS Safari는 미지원)
+      try {
+        if (screen.orientation && screen.orientation.lock) {
+          await screen.orientation.lock('landscape');
+        }
+      } catch (e) {}
+    } else {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) await exit.call(document);
+      try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {}
+    }
+  } catch (e) {}
+});
+
+// ===== 플레이어 관리 =====
+let players = [];
+let nextPlayerId = 1;
+let onlineDb = null;
+let onlineRoom = null;
+let onlineChannel = null;
+let remoteNameTimer = null;
+
+const $playersList = document.getElementById('players-list');
+const $playersCount = document.getElementById('players-count');
+
+function savePlayers() {
+  try { localStorage.setItem('poker_players', JSON.stringify(players)); } catch (e) {}
+}
+function loadPlayers() {
+  try {
+    const raw = localStorage.getItem('poker_players');
+    if (raw) {
+      players = JSON.parse(raw);
+      nextPlayerId = players.reduce((m, p) => Math.max(m, p.id), 0) + 1;
+    }
+  } catch (e) {}
+}
+
+const $totalBuyin = document.getElementById('total-buyin');
+const $chipFirst = document.getElementById('chip-first');
+const $chipRebuy = document.getElementById('chip-rebuy');
+const $totalChipValue = document.getElementById('total-chip-value');
+const BUYIN_UNIT = 10000;
+
+function loadChipConfig() {
+  try {
+    const raw = localStorage.getItem('poker_chip_config');
+    if (raw) {
+      const cfg = JSON.parse(raw);
+      if (typeof cfg.first === 'number') $chipFirst.value = cfg.first;
+      if (typeof cfg.rebuy === 'number') $chipRebuy.value = cfg.rebuy;
+    }
+  } catch (e) {}
+}
+function saveChipConfig() {
+  try {
+    localStorage.setItem('poker_chip_config', JSON.stringify({
+      first: parseFloat($chipFirst.value) || 0,
+      rebuy: parseFloat($chipRebuy.value) || 0,
+    }));
+  } catch (e) {}
+}
+
+function renderPlayers() {
+  $playersCount.textContent = players.length;
+  const addButton = document.getElementById('btn-add-player');
+  if (addButton) {
+    addButton.disabled = players.length >= 9;
+    addButton.textContent = players.length >= 9 ? '최대 9명 참가 중' : '+ 플레이어 추가';
+  }
+  const totalBuyins = players.reduce((sum, p) => sum + (p.buyin || 0), 0);
+  const totalMoney = totalBuyins * BUYIN_UNIT;
+  $totalBuyin.textContent = `총 바인: ${totalMoney.toLocaleString('en-US')}원 (${totalBuyins}회)`;
+
+  // 총 칩 계산: 각 플레이어의 첫 1회는 firstChip, 2회째부터는 rebuyChip
+  const firstChip = parseFloat($chipFirst.value) || 0;
+  const rebuyChip = parseFloat($chipRebuy.value) || 0;
+  let totalChip = 0;
+  players.forEach(p => {
+    const b = p.buyin || 0;
+    if (b >= 1) {
+      totalChip += firstChip;
+      totalChip += (b - 1) * rebuyChip;
+    }
+  });
+  // 소수점 깔끔하게
+  $totalChipValue.textContent = (Math.round(totalChip * 100) / 100).toLocaleString('en-US');
+
+  $playersList.innerHTML = '';
+  players.forEach((p, idx) => {
+    const row = document.createElement('div');
+    row.className = 'player-row';
+    row.innerHTML = `
+      <button class="pm" data-act="minus" data-id="${p.id}">−</button>
+      <input class="name" type="text" placeholder="이름" value="${(p.name || '').replace(/"/g, '&quot;')}" data-id="${p.id}">
+      <span class="buyin" title="바인 횟수">${p.buyin}</span>
+      <button class="pm" data-act="plus" data-id="${p.id}">+</button>
+      <button class="del" data-act="del" data-id="${p.id}" title="삭제">×</button>
+    `;
+    $playersList.appendChild(row);
+  });
+  savePlayers();
+}
+
+async function addPlayer() {
+  if (players.length >= 9) {
+    alert('참가자는 최대 9명까지 등록할 수 있습니다.');
+    return;
+  }
+  if (onlineRoom) {
+    const { error } = await onlineDb.from('poker_players').insert({
+      room_id: onlineRoom.id,
+      user_id: null,
+      name: `플레이어 ${players.length + 1}`,
+      buyin: 1,
+    });
+    if (error) setRoomStatus(`플레이어 추가 실패: ${error.message}`, false);
+    return;
+  }
+  players.push({ id: nextPlayerId++, name: '', buyin: 1 });
+  renderPlayers();
+  // 새로 추가된 칸에 포커스
+  const inputs = $playersList.querySelectorAll('input.name');
+  if (inputs.length) inputs[inputs.length - 1].focus();
+}
+
+$playersList.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const id = parseInt(btn.dataset.id);
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  const act = btn.dataset.act;
+  if (act === 'plus') p.buyin++;
+  else if (act === 'minus') p.buyin = Math.max(0, p.buyin - 1);
+  else if (act === 'del') {
+    if (confirm(`${p.name || '이 플레이어'}를 삭제할까요?`)) {
+      players = players.filter(x => x.id !== id);
+      if (onlineRoom) deleteOnlinePlayer(id);
+    }
+  }
+  renderPlayers();
+  if (onlineRoom && act !== 'del') persistOnlinePlayer(p);
+});
+$playersList.addEventListener('input', (e) => {
+  if (e.target.classList.contains('name')) {
+    const id = parseInt(e.target.dataset.id);
+    const p = players.find(x => x.id === id);
+    if (p) {
+      p.name = e.target.value;
+      savePlayers();
+      if (onlineRoom) {
+        clearTimeout(remoteNameTimer);
+        remoteNameTimer = setTimeout(() => persistOnlinePlayer(p), 350);
+      }
+    }
+  }
+});
+
+document.getElementById('btn-add-player').addEventListener('click', addPlayer);
+
+// 패널 접기/펼치기
+document.getElementById('players-header').addEventListener('click', (e) => {
+  if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
+  togglePanel();
+});
+document.getElementById('players-toggle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  togglePanel();
+});
+function togglePanel() {
+  const panel = document.getElementById('players-panel');
+  panel.classList.toggle('collapsed');
+  document.getElementById('players-toggle').textContent =
+    panel.classList.contains('collapsed') ? '+' : '–';
+}
+
+$chipFirst.addEventListener('input', () => { saveChipConfig(); renderPlayers(); });
+$chipRebuy.addEventListener('input', () => { saveChipConfig(); renderPlayers(); });
+
+loadChipConfig();
+loadPlayers();
+renderPlayers();
+
+// ===== 온라인 게임 방 / 실시간 참가 =====
+const $roomStatus = document.getElementById('room-status');
+const $roomShare = document.getElementById('room-share');
+const $roomCode = document.getElementById('room-code');
+const $joinUrl = document.getElementById('join-url');
+const $createRoom = document.getElementById('btn-create-room');
+
+function onlineConfigured() {
+  const cfg = window.POKER_CONFIG || {};
+  return cfg.supabaseUrl && cfg.supabaseAnonKey &&
+    !cfg.supabaseUrl.includes('YOUR_PROJECT') && !cfg.supabaseAnonKey.includes('YOUR_');
+}
+function setRoomStatus(message, connected = false) {
+  $roomStatus.textContent = message;
+  $roomStatus.classList.toggle('connected', connected);
+}
+function randomRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  return Array.from(bytes, b => chars[b % chars.length]).join('');
+}
+function participantUrl(code) {
+  const url = new URL('participant.html', location.href);
+  url.search = new URLSearchParams({ room: code }).toString();
+  return url.href;
+}
+function displayRoom(room) {
+  const url = participantUrl(room.code);
+  $roomShare.style.display = 'block';
+  $roomCode.textContent = `ROOM ${room.code}`;
+  $joinUrl.textContent = url;
+  document.getElementById('qr-code').innerHTML = '';
+  if (window.QRCode) new QRCode(document.getElementById('qr-code'), { text: url, width: 132, height: 132 });
+  $createRoom.textContent = '새 게임 방 만들기';
+  const localWarning = location.protocol === 'file:' ? ' · 현재 로컬 파일 주소라 QR 참가 불가, 웹 배포 필요' : '';
+  setRoomStatus(`온라인 연결됨 · 참가자 ${players.length}명${localWarning}`, true);
+}
+async function fetchOnlinePlayers() {
+  if (!onlineRoom) return;
+  const { data, error } = await onlineDb.from('poker_players')
+    .select('id,name,buyin,created_at').eq('room_id', onlineRoom.id).order('created_at');
+  if (error) return setRoomStatus(`명단 동기화 실패: ${error.message}`);
+  players = data.map(p => ({ id: Number(p.id), name: p.name, buyin: p.buyin }));
+  nextPlayerId = players.reduce((max, p) => Math.max(max, p.id), 0) + 1;
+  renderPlayers();
+  document.getElementById('btn-add-player').disabled = players.length >= 9;
+  displayRoom(onlineRoom);
+}
+async function persistOnlinePlayer(player) {
+  if (!onlineRoom || !String(player.name || '').trim()) return;
+  const { error } = await onlineDb.from('poker_players')
+    .update({ name: player.name.trim().slice(0, 20), buyin: player.buyin }).eq('id', player.id).eq('room_id', onlineRoom.id);
+  if (error) setRoomStatus(`변경 저장 실패: ${error.message}`);
+}
+async function deleteOnlinePlayer(id) {
+  const { error } = await onlineDb.from('poker_players').delete().eq('id', id).eq('room_id', onlineRoom.id);
+  if (error) setRoomStatus(`삭제 실패: ${error.message}`);
+}
+function subscribeRoom() {
+  if (onlineChannel) onlineDb.removeChannel(onlineChannel);
+  onlineChannel = onlineDb.channel(`room-${onlineRoom.id}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'poker_players', filter: `room_id=eq.${onlineRoom.id}` }, () => fetchOnlinePlayers())
+    .subscribe(state => {
+      if (state === 'CHANNEL_ERROR') setRoomStatus('실시간 연결이 끊겼습니다. 페이지를 새로고침해주세요.');
+    });
+}
+async function useRoom(room) {
+  onlineRoom = room;
+  localStorage.setItem('poker_online_room', JSON.stringify({ id: room.id, code: room.code }));
+  subscribeRoom();
+  await fetchOnlinePlayers();
+}
+async function createOnlineRoom() {
+  if (!onlineDb) return;
+  if (onlineRoom && !confirm('현재 방을 두고 새 게임 방을 만들까요?')) return;
+  $createRoom.disabled = true;
+  setRoomStatus('새 게임 방을 만드는 중…');
+  try {
+    const { data: userData, error: userError } = await onlineDb.auth.getUser();
+    if (userError) throw userError;
+    let created = null;
+    for (let attempt = 0; attempt < 4 && !created; attempt++) {
+      const { data, error } = await onlineDb.from('poker_rooms')
+        .insert({ code: randomRoomCode(), owner_id: userData.user.id }).select().single();
+      if (!error) created = data;
+      else if (error.code !== '23505') throw error;
+    }
+    if (!created) throw new Error('방 코드 생성에 실패했습니다. 다시 시도해주세요.');
+    await useRoom(created);
+  } catch (error) { setRoomStatus(`방 생성 실패: ${error.message}`); }
+  finally { $createRoom.disabled = false; }
+}
+async function initOnlineRoom() {
+  if (!onlineConfigured()) {
+    setRoomStatus('온라인 참가 미설정 · supabase-config.js에 프로젝트 정보를 입력하세요.');
+    $createRoom.disabled = true;
+    return;
+  }
+  try {
+    const cfg = window.POKER_CONFIG;
+    onlineDb = supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+    const { data: existing } = await onlineDb.auth.getSession();
+    if (!existing.session) {
+      const { error } = await onlineDb.auth.signInAnonymously();
+      if (error) throw error;
+    }
+    $createRoom.disabled = false;
+    setRoomStatus('연결 준비 완료 · 게임 방을 만들어주세요.');
+    const saved = JSON.parse(localStorage.getItem('poker_online_room') || 'null');
+    if (saved?.id) {
+      const { data } = await onlineDb.from('poker_rooms').select('*').eq('id', saved.id).maybeSingle();
+      if (data) await useRoom(data);
+    }
+  } catch (error) { setRoomStatus(`온라인 연결 실패: ${error.message}`); }
+}
+$createRoom.addEventListener('click', createOnlineRoom);
+initOnlineRoom();
+
+// 시간 조정 (분/초 감소·증가)
+function adjustTime(deltaMs) {
+  remainingMs += deltaMs;
+  if (remainingMs < 1000) remainingMs = 1000; // 최소 1초는 남겨둡니다 (0이 되면 자동 레벨업 트리거)
+  if (running) endTime = Date.now() + remainingMs;
+  lastDisplayedSec = -1;
+  render();
+}
+document.getElementById('btn-minus-min').addEventListener('click', () => adjustTime(-60 * 1000));
+document.getElementById('btn-plus-min').addEventListener('click', () => adjustTime(+60 * 1000));
+document.getElementById('btn-minus-sec').addEventListener('click', () => adjustTime(-10 * 1000));
+document.getElementById('btn-plus-sec').addEventListener('click', () => adjustTime(+10 * 1000));
+
+render();
+</script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
