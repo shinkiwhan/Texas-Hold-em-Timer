@@ -27,6 +27,12 @@
   #status { min-height: 24px; margin-top: 18px; color: #a1a1aa; text-align: center; font-size: 14px; }
   #status.error { color: #f87171; }
   #room-label { color: #71717a; margin-top: 24px; text-align: center; font-size: 13px; }
+  #tournament-state { display: none; margin-bottom: 14px; padding: 16px 18px; background: #111114; border: 1px solid #29292e; border-radius: 16px; text-align: center; }
+  #mobile-level { color: #a1a1aa; font-size: 13px; font-weight: 800; letter-spacing: .14em; }
+  #mobile-timer { margin: 3px 0; font-size: 50px; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+  #mobile-blinds { font-size: 20px; font-weight: 700; }
+  #rebuy-state { margin-top: 8px; color: #4ade80; font-size: 12px; }
+  #rebuy-state.closed { color: #f87171; }
 </style>
 </head>
 <body>
@@ -34,6 +40,12 @@
   <div class="eyebrow">HOME POKER NIGHT</div>
   <h1>게임 참가</h1>
   <p class="sub">닉네임으로 참가한 뒤, 이 화면에서 직접 리바인할 수 있어요.</p>
+  <section id="tournament-state">
+    <div id="mobile-level">LEVEL 1</div>
+    <div id="mobile-timer">07:00</div>
+    <div id="mobile-blinds">100 / 200</div>
+    <div id="rebuy-state">리바인 가능</div>
+  </section>
   <section class="card">
     <div id="join-view">
       <label for="nickname">이름 또는 닉네임</label>
@@ -59,6 +71,18 @@ const config = window.POKER_CONFIG || {};
 const code = new URLSearchParams(location.search).get('room')?.trim().toUpperCase();
 const $ = id => document.getElementById(id);
 let db, room, player, channel;
+let roomTimerInterval = null;
+const LEVELS = [
+  { type:'blind', sb:100, bb:200, minutes:7 }, { type:'blind', sb:200, bb:400, minutes:7 },
+  { type:'blind', sb:300, bb:600, minutes:7 }, { type:'blind', sb:400, bb:800, minutes:7 },
+  { type:'blind', sb:500, bb:1000, minutes:7 }, { type:'break', minutes:5 },
+  { type:'blind', sb:1000, bb:2000, minutes:7 }, { type:'blind', sb:2000, bb:4000, minutes:7 },
+  { type:'blind', sb:3000, bb:6000, minutes:7 }, { type:'blind', sb:4000, bb:8000, minutes:7 },
+  { type:'blind', sb:7000, bb:14000, minutes:7 }, { type:'break', minutes:5 },
+  { type:'blind', sb:10000, bb:20000, minutes:7 }, { type:'blind', sb:20000, bb:40000, minutes:7 },
+  { type:'blind', sb:30000, bb:60000, minutes:7 }, { type:'blind', sb:40000, bb:80000, minutes:7 },
+  { type:'blind', sb:50000, bb:100000, minutes:7 },
+];
 
 function configured() {
   return config.supabaseUrl && config.supabaseAnonKey && !config.supabaseUrl.includes('YOUR_PROJECT') && !config.supabaseAnonKey.includes('YOUR_');
@@ -66,6 +90,37 @@ function configured() {
 function status(message, error = false) {
   $('status').textContent = message;
   $('status').classList.toggle('error', error);
+}
+function fmt(n) { return Number(n).toLocaleString('en-US'); }
+function blindNumber(stage) {
+  let count = 0;
+  for (let i = 0; i <= stage; i++) if (LEVELS[i]?.type === 'blind') count++;
+  return count;
+}
+function rebuyOpen() {
+  return room && Number(room.current_level || 0) <= Number(room.rebuy_until_stage ?? 4);
+}
+function renderRoomTimer() {
+  if (!room) return;
+  const stage = Math.min(LEVELS.length - 1, Math.max(0, Number(room.current_level) || 0));
+  const level = LEVELS[stage];
+  let ms = Number(room.timer_remaining_ms) || level.minutes * 60000;
+  if (room.timer_running && room.timer_ends_at) ms = Math.max(0, new Date(room.timer_ends_at).getTime() - Date.now());
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  $('mobile-timer').textContent = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  $('mobile-level').textContent = level.type === 'break' ? 'BREAK TIME' : `LEVEL ${blindNumber(stage)}`;
+  $('mobile-blinds').textContent = level.type === 'break' ? '☕ 휴식 ☕' : `${fmt(level.sb)} / ${fmt(level.bb)}`;
+  const open = rebuyOpen();
+  $('rebuy-state').textContent = open ? `리바인 가능 · 레벨 ${blindNumber(Number(room.rebuy_until_stage ?? 4))} 종료까지` : '리바인 마감';
+  $('rebuy-state').classList.toggle('closed', !open);
+  $('rebuy-btn').disabled = !open;
+  $('rebuy-btn').textContent = open ? '리바인' : '리바인 마감';
+  $('tournament-state').style.display = 'block';
+}
+function applyRoom(nextRoom) {
+  room = nextRoom;
+  renderRoomTimer();
+  if (!roomTimerInterval) roomTimerInterval = setInterval(renderRoomTimer, 250);
 }
 function showPlayer() {
   $('join-view').style.display = 'none';
@@ -103,7 +158,7 @@ async function init() {
     const { data, error } = await db.from('poker_rooms').select('*').eq('code', code).maybeSingle();
     if (error) throw error;
     if (!data) return status('존재하지 않는 게임 방입니다.', true);
-    room = data;
+    applyRoom(data);
     if (!room.is_open) status('참가가 마감된 게임입니다.', true);
     await fetchPlayer(user.id);
     channel = db.channel(`participant-${room.id}-${user.id}`)
@@ -119,6 +174,9 @@ async function init() {
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'poker_rooms', filter: `id=eq.${room.id}` }, () => {
         room.is_open = false;
         showJoin('중앙에서 게임 방을 종료했습니다.');
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'poker_rooms', filter: `id=eq.${room.id}` }, payload => {
+        applyRoom(payload.new);
       }).subscribe();
   } catch (error) { status(`연결 실패: ${error.message}`, true); }
 }
@@ -141,11 +199,11 @@ $('join-btn').addEventListener('click', async () => {
 });
 $('nickname').addEventListener('keydown', e => { if (e.key === 'Enter') $('join-btn').click(); });
 $('rebuy-btn').addEventListener('click', async () => {
+  if (!rebuyOpen()) return status('리바인 마감 레벨이 지났습니다.', true);
   if (!player || !confirm(`리바인할까요?\n확인하면 바인 횟수가 ${player.buyin + 1}회가 됩니다.`)) return;
   $('rebuy-btn').disabled = true;
   try {
-    const next = player.buyin + 1;
-    const { data, error } = await db.from('poker_players').update({ buyin: next }).eq('id', player.id).select().single();
+    const { data, error } = await db.rpc('change_poker_buyin', { p_player_id: player.id, p_delta: 1 });
     if (error) throw error;
     player = data; showPlayer(); status('리바인이 반영되었습니다.');
   } catch (error) { status(`리바인 실패: ${error.message}`, true); }

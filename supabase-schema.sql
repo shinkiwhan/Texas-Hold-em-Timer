@@ -1,4 +1,5 @@
--- Supabase SQL Editor에서 한 번 실행하세요.
+-- 최초 스키마 참고용 파일입니다.
+-- 현재 프로젝트의 추가 변경은 supabase/migrations 폴더와 Supabase CLI로 관리합니다.
 create extension if not exists pgcrypto;
 
 create table if not exists public.poker_rooms (

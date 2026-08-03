@@ -309,6 +309,8 @@
   #active-room-actions button { flex: 1; min-height: 36px; padding: 7px; font-size: 12px; }
   #btn-show-qr { background: #1a3a1a; border-color: #336633; }
   #btn-end-room { background: #3b1717; border-color: #713333; }
+  #rebuy-setting { display: none; align-items: center; gap: 7px; margin-top: 8px; color: #aaa; font-size: 12px; }
+  #rebuy-cutoff { flex: 1; min-height: 32px; background: #181818; color: #fff; border: 1px solid #444; border-radius: 6px; padding: 4px 7px; }
   #room-status { color: #888; font-size: 12px; line-height: 1.45; margin-top: 7px; overflow-wrap: anywhere; }
   #room-status.connected { color: #4ade80; }
   #room-share { display: none; position: fixed; inset: 0; z-index: 500; background: rgba(0,0,0,.78); align-items: center; justify-content: center; padding: 24px; }
@@ -319,6 +321,13 @@
   #qr-code img, #qr-code canvas { width: 100% !important; height: 100% !important; }
   #join-url { color: #888; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
   #btn-close-qr { width: 100%; margin-top: 14px; padding: 9px; min-height: 40px; }
+  #event-log { display: none; margin-bottom: 8px; padding: 7px; background: rgba(0,0,0,.28); border-radius: 7px; color: #aaa; font-size: 11px; line-height: 1.5; }
+  .event-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+  .event-row button { min-height: 26px; padding: 3px 7px; font-size: 10px; background: #3b2f10; border-color: #715d25; }
+  #event-toast { display: none; position: fixed; top: max(88px, calc(env(safe-area-inset-top) + 76px)); left: 50%; transform: translateX(-50%); z-index: 600; min-width: 260px; max-width: 80vw; background: #1b1b1b; border: 1px solid #666; border-radius: 12px; padding: 13px 16px; box-shadow: 0 12px 44px #000; text-align: center; color: #fff; }
+  #event-toast.show { display: block; animation: toast-in .2s ease-out; }
+  #event-toast button { margin-left: 10px; min-height: 30px; padding: 4px 9px; font-size: 11px; }
+  @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -8px); } }
 
   @media (max-width: 600px) {
     #players-panel { width: 260px; max-width: 70vw; padding: 10px; }
@@ -367,6 +376,18 @@
       <button id="btn-show-qr">QR 참가</button>
       <button id="btn-end-room">방 종료</button>
     </div>
+    <label id="rebuy-setting">리바인 마감
+      <select id="rebuy-cutoff">
+        <option value="0">레벨 1 종료</option><option value="1">레벨 2 종료</option>
+        <option value="2">레벨 3 종료</option><option value="3">레벨 4 종료</option>
+        <option value="4" selected>레벨 5 종료</option><option value="6">레벨 6 종료</option>
+        <option value="7">레벨 7 종료</option><option value="8">레벨 8 종료</option>
+        <option value="9">레벨 9 종료</option><option value="10">레벨 10 종료</option>
+        <option value="12">레벨 11 종료</option><option value="13">레벨 12 종료</option>
+        <option value="14">레벨 13 종료</option><option value="15">레벨 14 종료</option>
+        <option value="16">레벨 15 종료</option>
+      </select>
+    </label>
     <div id="room-share">
       <div id="qr-dialog">
         <div id="room-code"></div>
@@ -397,11 +418,13 @@
     <button id="players-toggle" title="접기/펼치기">–</button>
   </div>
   <div class="panel-body">
+    <div id="event-log"></div>
     <div id="players-list"></div>
     <button id="btn-add-player">+ 플레이어 추가</button>
   </div>
 </div>
 <button id="btn-fullscreen">⛶ 전체화면</button>
+<div id="event-toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
@@ -457,6 +480,59 @@ function findNextBlind(idx) {
 
 let lastDisplayedSec = -1;
 
+function saveTimerState(syncOnline = true) {
+  const state = {
+    currentLevel,
+    remainingMs: running && endTime != null ? Math.max(0, endTime - Date.now()) : remainingMs,
+    endTime,
+    running,
+    savedAt: Date.now(),
+  };
+  try { localStorage.setItem('poker_timer_state', JSON.stringify(state)); } catch (e) {}
+  if (syncOnline && onlineRoom) syncRoomTimer();
+}
+
+function loadTimerState() {
+  try {
+    const state = JSON.parse(localStorage.getItem('poker_timer_state') || 'null');
+    if (!state || !Number.isInteger(state.currentLevel) || state.currentLevel < 0 || state.currentLevel >= LEVELS.length) return;
+    currentLevel = state.currentLevel;
+    running = Boolean(state.running);
+    endTime = running && Number.isFinite(state.endTime) ? state.endTime : null;
+    remainingMs = running && endTime != null
+      ? endTime - Date.now()
+      : Math.max(0, Number(state.remainingMs) || 0);
+  } catch (e) {}
+}
+
+function updateRunningUi() {
+  $btnStart.textContent = running ? '⏸ 일시정지' : (remainingMs > 0 ? '▶ 재개' : '▶ 시작');
+  $btnStart.classList.toggle('running', running);
+}
+
+function advanceExpiredLevels(now = Date.now()) {
+  let advanced = false;
+  let overdue = Math.max(0, -remainingMs);
+  while (remainingMs <= 0 && currentLevel < LEVELS.length - 1) {
+    currentLevel++;
+    advanced = true;
+    remainingMs = LEVELS[currentLevel].minutes * 60 * 1000 - overdue;
+    overdue = Math.max(0, -remainingMs);
+  }
+  if (remainingMs <= 0 && currentLevel === LEVELS.length - 1) {
+    running = false;
+    endTime = null;
+    remainingMs = 0;
+    if (intervalId) { clearInterval(intervalId); intervalId = null; }
+    releaseAwake();
+  } else if (running) {
+    endTime = now + remainingMs;
+  }
+  if (advanced) lastDisplayedSec = -1;
+  updateRunningUi();
+  return advanced;
+}
+
 function tick() {
   if (running && endTime != null) {
     remainingMs = endTime - Date.now();
@@ -466,8 +542,8 @@ function tick() {
       setTimeout(() => beep(1175, 0.25), 180);
       // 진동
       vibrate([200, 100, 200]);
-      goNext();
-      return;
+      advanceExpiredLevels();
+      saveTimerState();
     }
   }
 
@@ -526,16 +602,19 @@ function start() {
   if (intervalId) clearInterval(intervalId);
   intervalId = setInterval(tick, 100);
   tick();
+  saveTimerState();
 }
 function pause() {
   if (!running) return;
-  remainingMs = endTime - Date.now();
+  remainingMs = Math.max(0, endTime - Date.now());
   running = false;
   endTime = null;
   $btnStart.textContent = '▶ 재개';
   $btnStart.classList.remove('running');
   if (intervalId) { clearInterval(intervalId); intervalId = null; }
   releaseAwake();
+  updateRunningUi();
+  saveTimerState();
 }
 function toggle() { running ? pause() : start(); }
 
@@ -550,6 +629,8 @@ function goNext() {
   }
   lastDisplayedSec = -1;
   render();
+  updateRunningUi();
+  saveTimerState();
 }
 function goPrev() {
   if (currentLevel > 0) currentLevel--;
@@ -557,6 +638,7 @@ function goPrev() {
   if (running) endTime = Date.now() + remainingMs;
   lastDisplayedSec = -1;
   render();
+  saveTimerState();
 }
 function reset() {
   pause();
@@ -564,6 +646,8 @@ function reset() {
   remainingMs = LEVELS[0].minutes * 60 * 1000;
   lastDisplayedSec = -1;
   render();
+  updateRunningUi();
+  saveTimerState();
 }
 
 // ===== 오디오 (모바일 대응) =====
@@ -656,6 +740,9 @@ let onlineDb = null;
 let onlineRoom = null;
 let onlineChannel = null;
 let remoteNameTimer = null;
+let onlineEvents = [];
+let eventToastTimer = null;
+let roomSyncTimer = null;
 
 const $playersList = document.getElementById('players-list');
 const $playersCount = document.getElementById('players-count');
@@ -761,13 +848,17 @@ async function addPlayer() {
   if (inputs.length) inputs[inputs.length - 1].focus();
 }
 
-$playersList.addEventListener('click', (e) => {
+$playersList.addEventListener('click', async (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   const id = parseInt(btn.dataset.id);
   const p = players.find(x => x.id === id);
   if (!p) return;
   const act = btn.dataset.act;
+  if (onlineRoom && (act === 'plus' || act === 'minus')) {
+    await changeOnlineBuyin(id, act === 'plus' ? 1 : -1);
+    return;
+  }
   if (act === 'plus') p.buyin++;
   else if (act === 'minus') p.buyin = Math.max(0, p.buyin - 1);
   else if (act === 'del') {
@@ -777,7 +868,6 @@ $playersList.addEventListener('click', (e) => {
     }
   }
   renderPlayers();
-  if (onlineRoom && act !== 'del') persistOnlinePlayer(p);
 });
 $playersList.addEventListener('input', (e) => {
   if (e.target.classList.contains('name')) {
@@ -826,6 +916,10 @@ const $roomCode = document.getElementById('room-code');
 const $joinUrl = document.getElementById('join-url');
 const $createRoom = document.getElementById('btn-create-room');
 const $activeRoomActions = document.getElementById('active-room-actions');
+const $rebuySetting = document.getElementById('rebuy-setting');
+const $rebuyCutoff = document.getElementById('rebuy-cutoff');
+const $eventLog = document.getElementById('event-log');
+const $eventToast = document.getElementById('event-toast');
 
 function onlineConfigured() {
   const cfg = window.POKER_CONFIG || {};
@@ -854,6 +948,8 @@ function displayRoom(room) {
   if (window.QRCode) new QRCode(document.getElementById('qr-code'), { text: url, width: 132, height: 132 });
   document.getElementById('room-actions').style.display = 'none';
   $activeRoomActions.style.display = 'flex';
+  $rebuySetting.style.display = 'flex';
+  $rebuyCutoff.value = String(room.rebuy_until_stage ?? 4);
   const localWarning = location.protocol === 'file:' ? ' · 현재 로컬 파일 주소라 QR 참가 불가, 웹 배포 필요' : '';
   setRoomStatus(`온라인 연결됨 · 참가자 ${players.length}명${localWarning}`, true);
 }
@@ -871,8 +967,12 @@ async function fetchOnlinePlayers() {
 async function persistOnlinePlayer(player) {
   if (!onlineRoom || !String(player.name || '').trim()) return;
   const { error } = await onlineDb.from('poker_players')
-    .update({ name: player.name.trim().slice(0, 20), buyin: player.buyin }).eq('id', player.id).eq('room_id', onlineRoom.id);
+    .update({ name: player.name.trim().slice(0, 20) }).eq('id', player.id).eq('room_id', onlineRoom.id);
   if (error) setRoomStatus(`변경 저장 실패: ${error.message}`);
+}
+async function changeOnlineBuyin(id, delta) {
+  const { error } = await onlineDb.rpc('change_poker_buyin', { p_player_id: id, p_delta: delta });
+  if (error) setRoomStatus(`바인 변경 실패: ${error.message}`);
 }
 async function deleteOnlinePlayer(id) {
   const { error } = await onlineDb.from('poker_players').delete().eq('id', id).eq('room_id', onlineRoom.id);
@@ -882,15 +982,110 @@ function subscribeRoom() {
   if (onlineChannel) onlineDb.removeChannel(onlineChannel);
   onlineChannel = onlineDb.channel(`room-${onlineRoom.id}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'poker_players', filter: `room_id=eq.${onlineRoom.id}` }, () => fetchOnlinePlayers())
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'poker_events', filter: `room_id=eq.${onlineRoom.id}` }, payload => handleNewEvent(payload.new))
     .subscribe(state => {
       if (state === 'CHANNEL_ERROR') setRoomStatus('실시간 연결이 끊겼습니다. 페이지를 새로고침해주세요.');
     });
 }
+function timerRoomPayload() {
+  const liveRemaining = running && endTime != null ? Math.max(0, endTime - Date.now()) : Math.max(0, remainingMs);
+  return {
+    current_level: currentLevel,
+    timer_running: running,
+    timer_ends_at: running && endTime != null ? new Date(endTime).toISOString() : null,
+    timer_remaining_ms: Math.round(liveRemaining),
+    updated_at: new Date().toISOString(),
+  };
+}
+function syncRoomTimer() {
+  if (!onlineRoom || !onlineDb) return;
+  clearTimeout(roomSyncTimer);
+  roomSyncTimer = setTimeout(async () => {
+    const payload = timerRoomPayload();
+    const { error } = await onlineDb.from('poker_rooms').update(payload).eq('id', onlineRoom.id);
+    if (!error) Object.assign(onlineRoom, payload);
+    else setRoomStatus(`타이머 동기화 실패: ${error.message}`);
+  }, 120);
+}
+function applyRoomTimer(room) {
+  if (intervalId) { clearInterval(intervalId); intervalId = null; }
+  currentLevel = Math.min(LEVELS.length - 1, Math.max(0, Number(room.current_level) || 0));
+  running = Boolean(room.timer_running);
+  endTime = running && room.timer_ends_at ? new Date(room.timer_ends_at).getTime() : null;
+  remainingMs = running && endTime != null
+    ? endTime - Date.now()
+    : Math.max(0, Number(room.timer_remaining_ms) || LEVELS[currentLevel].minutes * 60000);
+  if (running) {
+    advanceExpiredLevels();
+    intervalId = setInterval(tick, 100);
+  }
+  updateRunningUi();
+  render();
+  saveTimerState(false);
+}
+async function fetchOnlineEvents() {
+  if (!onlineRoom) return;
+  const { data, error } = await onlineDb.from('poker_events').select('*')
+    .eq('room_id', onlineRoom.id).order('created_at', { ascending: false }).limit(5);
+  if (!error) { onlineEvents = data; renderEventLog(); }
+}
+function eventLabel(event) {
+  if (event.event_type === 'join') return `${event.player_name} 참가`;
+  if (event.event_type === 'rebuy') return `${event.player_name} 리바인 (${event.buyin_after}회)`;
+  return `${event.player_name} 바인 취소 (${event.buyin_after}회)`;
+}
+function renderEventLog() {
+  $eventLog.innerHTML = '';
+  $eventLog.style.display = onlineEvents.length ? 'block' : 'none';
+  onlineEvents.slice(0, 3).forEach(event => {
+    const row = document.createElement('div');
+    row.className = 'event-row';
+    const label = document.createElement('span');
+    label.textContent = eventLabel(event);
+    row.appendChild(label);
+    if (event.event_type === 'rebuy' && !event.reversed_at) {
+      const undo = document.createElement('button');
+      undo.textContent = '취소';
+      undo.addEventListener('click', () => undoRebuy(event.id));
+      row.appendChild(undo);
+    }
+    $eventLog.appendChild(row);
+  });
+}
+function showEventToast(event) {
+  clearTimeout(eventToastTimer);
+  $eventToast.innerHTML = '';
+  const text = document.createElement('span');
+  text.textContent = event.event_type === 'join' ? `♠ ${event.player_name}님이 참가했습니다` : `💰 ${event.player_name}님이 리바인했습니다`;
+  $eventToast.appendChild(text);
+  if (event.event_type === 'rebuy') {
+    const undo = document.createElement('button');
+    undo.textContent = '되돌리기';
+    undo.addEventListener('click', () => undoRebuy(event.id));
+    $eventToast.appendChild(undo);
+  }
+  $eventToast.classList.add('show');
+  beep(event.event_type === 'join' ? 660 : 880, 0.16);
+  eventToastTimer = setTimeout(() => $eventToast.classList.remove('show'), 5000);
+}
+async function handleNewEvent(event) {
+  await fetchOnlineEvents();
+  if (event.event_type === 'join' || event.event_type === 'rebuy') showEventToast(event);
+}
+async function undoRebuy(eventId) {
+  const { error } = await onlineDb.rpc('undo_poker_rebuy', { p_event_id: eventId });
+  if (error) setRoomStatus(`리바인 취소 실패: ${error.message}`);
+  else {
+    $eventToast.classList.remove('show');
+    await fetchOnlineEvents();
+  }
+}
 async function useRoom(room) {
   onlineRoom = room;
   localStorage.setItem('poker_online_room', JSON.stringify({ id: room.id, code: room.code }));
+  applyRoomTimer(room);
   subscribeRoom();
-  await fetchOnlinePlayers();
+  await Promise.all([fetchOnlinePlayers(), fetchOnlineEvents()]);
 }
 async function createOnlineRoom() {
   if (!onlineDb) return;
@@ -903,7 +1098,7 @@ async function createOnlineRoom() {
     let created = null;
     for (let attempt = 0; attempt < 4 && !created; attempt++) {
       const { data, error } = await onlineDb.from('poker_rooms')
-        .insert({ code: randomRoomCode(), owner_id: userData.user.id }).select().single();
+        .insert({ code: randomRoomCode(), owner_id: userData.user.id, rebuy_until_stage: Number($rebuyCutoff.value), ...timerRoomPayload() }).select().single();
       if (!error) created = data;
       else if (error.code !== '23505') throw error;
     }
@@ -931,6 +1126,9 @@ async function endOnlineRoom() {
     localStorage.removeItem('poker_online_room');
     closeQrDialog();
     $activeRoomActions.style.display = 'none';
+    $rebuySetting.style.display = 'none';
+    onlineEvents = [];
+    renderEventLog();
     document.getElementById('room-actions').style.display = 'flex';
     $createRoom.textContent = '온라인 게임 방 만들기';
     renderPlayers();
@@ -965,6 +1163,13 @@ $createRoom.addEventListener('click', createOnlineRoom);
 document.getElementById('btn-show-qr').addEventListener('click', showQrDialog);
 document.getElementById('btn-close-qr').addEventListener('click', closeQrDialog);
 document.getElementById('btn-end-room').addEventListener('click', endOnlineRoom);
+$rebuyCutoff.addEventListener('change', async () => {
+  if (!onlineRoom) return;
+  const value = Number($rebuyCutoff.value);
+  const { error } = await onlineDb.from('poker_rooms').update({ rebuy_until_stage: value, updated_at: new Date().toISOString() }).eq('id', onlineRoom.id);
+  if (error) setRoomStatus(`리바인 마감 저장 실패: ${error.message}`);
+  else onlineRoom.rebuy_until_stage = value;
+});
 $roomShare.addEventListener('click', e => { if (e.target === $roomShare) closeQrDialog(); });
 initOnlineRoom();
 
@@ -975,14 +1180,22 @@ function adjustTime(deltaMs) {
   if (running) endTime = Date.now() + remainingMs;
   lastDisplayedSec = -1;
   render();
+  saveTimerState();
 }
 document.getElementById('btn-minus-min').addEventListener('click', () => adjustTime(-60 * 1000));
 document.getElementById('btn-plus-min').addEventListener('click', () => adjustTime(+60 * 1000));
 document.getElementById('btn-minus-sec').addEventListener('click', () => adjustTime(-10 * 1000));
 document.getElementById('btn-plus-sec').addEventListener('click', () => adjustTime(+10 * 1000));
 
-render();
+loadTimerState();
+updateRunningUi();
+if (running) {
+  advanceExpiredLevels();
+  intervalId = setInterval(tick, 100);
+  tick();
+} else {
+  render();
+}
 </script>
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"4edd5f8ec12a48cfa682ab8261b80a79","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
