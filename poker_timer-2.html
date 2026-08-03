@@ -164,9 +164,15 @@
     right: 16px;
     bottom: max(12px, env(safe-area-inset-bottom));
     z-index: 170;
-    min-width: 132px;
-    background: #172554;
-    border-color: #3557a5;
+    min-width: 190px;
+    background: #1e3a8a;
+    border: 1px solid #60a5fa;
+    box-shadow: 0 8px 28px rgba(37, 99, 235, 0.35);
+    font-weight: 700;
+  }
+  #btn-panel-drawer:hover {
+    background: #294ca3;
+    border-color: #93c5fd;
   }
 
   #players-header {
@@ -410,7 +416,7 @@
 </div>
 
 <div id="panel-backdrop"></div>
-<button id="btn-panel-drawer">플레이어 0명</button>
+<button id="btn-panel-drawer" type="button" aria-label="플레이어 패널 열기" aria-expanded="false">☰ 플레이어 0명 보기 ›</button>
 <div id="players-panel">
   <div id="online-room">
     <div id="room-actions">
@@ -834,7 +840,8 @@ function saveChipConfig() {
 
 function renderPlayers() {
   $playersCount.textContent = players.length;
-  $panelDrawerButton.textContent = `플레이어 ${players.length}명`;
+  $panelDrawerButton.textContent = `☰ 플레이어 ${players.length}명 보기 ›`;
+  $panelDrawerButton.setAttribute('aria-label', `플레이어 ${players.length}명 패널 열기`);
   const addButton = document.getElementById('btn-add-player');
   if (addButton) {
     addButton.disabled = players.length >= 9 || (onlineRoom && !isRoomOwner);
