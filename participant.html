@@ -120,7 +120,12 @@ function renderRoomTimer() {
 function applyRoom(nextRoom) {
   room = nextRoom;
   renderRoomTimer();
-  if (!roomTimerInterval) roomTimerInterval = setInterval(renderRoomTimer, 250);
+  if (!roomTimerInterval) roomTimerInterval = setInterval(renderRoomTimer, 100);
+}
+async function refreshRoomState() {
+  if (!db || !room?.id) return;
+  const { data } = await db.from('poker_rooms').select('*').eq('id', room.id).maybeSingle();
+  if (data) applyRoom(data);
 }
 function showPlayer() {
   $('join-view').style.display = 'none';
@@ -223,6 +228,9 @@ $('leave-btn').addEventListener('click', async () => {
     showJoin('게임에서 나왔습니다. 같은 방에 다시 참가할 수 있습니다.');
   } catch (error) { status(`나가기 실패: ${error.message}`, true); }
   finally { $('leave-btn').disabled = false; }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshRoomState();
 });
 init();
 </script>

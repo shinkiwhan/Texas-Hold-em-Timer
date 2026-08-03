@@ -321,9 +321,6 @@
   #qr-code img, #qr-code canvas { width: 100% !important; height: 100% !important; }
   #join-url { color: #888; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
   #btn-close-qr { width: 100%; margin-top: 14px; padding: 9px; min-height: 40px; }
-  #event-log { display: none; margin-bottom: 8px; padding: 7px; background: rgba(0,0,0,.28); border-radius: 7px; color: #aaa; font-size: 11px; line-height: 1.5; }
-  .event-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  .event-row button { min-height: 26px; padding: 3px 7px; font-size: 10px; background: #3b2f10; border-color: #715d25; }
   #event-toast { display: none; position: fixed; top: max(88px, calc(env(safe-area-inset-top) + 76px)); left: 50%; transform: translateX(-50%); z-index: 600; min-width: 260px; max-width: 80vw; background: #1b1b1b; border: 1px solid #666; border-radius: 12px; padding: 13px 16px; box-shadow: 0 12px 44px #000; text-align: center; color: #fff; }
   #event-toast.show { display: block; animation: toast-in .2s ease-out; }
   #event-toast button { margin-left: 10px; min-height: 30px; padding: 4px 9px; font-size: 11px; }
@@ -418,7 +415,6 @@
     <button id="players-toggle" title="접기/펼치기">–</button>
   </div>
   <div class="panel-body">
-    <div id="event-log"></div>
     <div id="players-list"></div>
     <button id="btn-add-player">+ 플레이어 추가</button>
   </div>
@@ -740,7 +736,6 @@ let onlineDb = null;
 let onlineRoom = null;
 let onlineChannel = null;
 let remoteNameTimer = null;
-let onlineEvents = [];
 let eventToastTimer = null;
 let roomSyncTimer = null;
 
@@ -918,7 +913,6 @@ const $createRoom = document.getElementById('btn-create-room');
 const $activeRoomActions = document.getElementById('active-room-actions');
 const $rebuySetting = document.getElementById('rebuy-setting');
 const $rebuyCutoff = document.getElementById('rebuy-cutoff');
-const $eventLog = document.getElementById('event-log');
 const $eventToast = document.getElementById('event-toast');
 
 function onlineConfigured() {
@@ -1023,35 +1017,6 @@ function applyRoomTimer(room) {
   render();
   saveTimerState(false);
 }
-async function fetchOnlineEvents() {
-  if (!onlineRoom) return;
-  const { data, error } = await onlineDb.from('poker_events').select('*')
-    .eq('room_id', onlineRoom.id).order('created_at', { ascending: false }).limit(5);
-  if (!error) { onlineEvents = data; renderEventLog(); }
-}
-function eventLabel(event) {
-  if (event.event_type === 'join') return `${event.player_name} 참가`;
-  if (event.event_type === 'rebuy') return `${event.player_name} 리바인 (${event.buyin_after}회)`;
-  return `${event.player_name} 바인 취소 (${event.buyin_after}회)`;
-}
-function renderEventLog() {
-  $eventLog.innerHTML = '';
-  $eventLog.style.display = onlineEvents.length ? 'block' : 'none';
-  onlineEvents.slice(0, 3).forEach(event => {
-    const row = document.createElement('div');
-    row.className = 'event-row';
-    const label = document.createElement('span');
-    label.textContent = eventLabel(event);
-    row.appendChild(label);
-    if (event.event_type === 'rebuy' && !event.reversed_at) {
-      const undo = document.createElement('button');
-      undo.textContent = '취소';
-      undo.addEventListener('click', () => undoRebuy(event.id));
-      row.appendChild(undo);
-    }
-    $eventLog.appendChild(row);
-  });
-}
 function showEventToast(event) {
   clearTimeout(eventToastTimer);
   $eventToast.innerHTML = '';
@@ -1069,7 +1034,6 @@ function showEventToast(event) {
   eventToastTimer = setTimeout(() => $eventToast.classList.remove('show'), 5000);
 }
 async function handleNewEvent(event) {
-  await fetchOnlineEvents();
   if (event.event_type === 'join' || event.event_type === 'rebuy') showEventToast(event);
 }
 async function undoRebuy(eventId) {
@@ -1077,7 +1041,6 @@ async function undoRebuy(eventId) {
   if (error) setRoomStatus(`리바인 취소 실패: ${error.message}`);
   else {
     $eventToast.classList.remove('show');
-    await fetchOnlineEvents();
   }
 }
 async function useRoom(room) {
@@ -1085,7 +1048,7 @@ async function useRoom(room) {
   localStorage.setItem('poker_online_room', JSON.stringify({ id: room.id, code: room.code }));
   applyRoomTimer(room);
   subscribeRoom();
-  await Promise.all([fetchOnlinePlayers(), fetchOnlineEvents()]);
+  await fetchOnlinePlayers();
 }
 async function createOnlineRoom() {
   if (!onlineDb) return;
@@ -1127,8 +1090,6 @@ async function endOnlineRoom() {
     closeQrDialog();
     $activeRoomActions.style.display = 'none';
     $rebuySetting.style.display = 'none';
-    onlineEvents = [];
-    renderEventLog();
     document.getElementById('room-actions').style.display = 'flex';
     $createRoom.textContent = '온라인 게임 방 만들기';
     renderPlayers();
