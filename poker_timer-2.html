@@ -31,6 +31,18 @@
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 
+  #timer-stage {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: calc(100% - min(320px, 40vw) - 48px);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: max(110px, env(safe-area-inset-top)) 16px max(50px, env(safe-area-inset-bottom));
+    transition: width 0.2s ease;
+  }
+
   #level-label {
     font-size: clamp(14px, 3vw, 32px);
     letter-spacing: 0.3em;
@@ -40,7 +52,7 @@
   }
 
   #timer {
-    font-size: clamp(80px, 28vw, 360px);
+    font-size: clamp(64px, calc((100vw - min(320px, 40vw) - 64px) * 0.3), 360px);
     font-weight: 700;
     line-height: 1;
     font-variant-numeric: tabular-nums;
@@ -48,7 +60,7 @@
   }
 
   #blinds {
-    font-size: clamp(28px, 8vw, 110px);
+    font-size: clamp(24px, calc((100vw - min(320px, 40vw) - 64px) * 0.09), 110px);
     margin-top: 2vh;
     letter-spacing: 0.05em;
     font-weight: 500;
@@ -328,6 +340,9 @@
 
   @media (max-width: 600px) {
     #players-panel { width: 260px; max-width: 70vw; padding: 10px; }
+    #timer-stage { width: calc(100% - min(260px, 70vw) - 24px); padding-inline: 8px; }
+    #timer { font-size: clamp(48px, calc((100vw - min(260px, 70vw) - 32px) * 0.3), 160px); }
+    #blinds { font-size: clamp(20px, calc((100vw - min(260px, 70vw) - 32px) * 0.09), 54px); }
     .player-row input.name { font-size: 13px; padding: 6px 8px; }
     .player-row button.pm { width: 28px; height: 28px; min-height: 28px; font-size: 14px; }
   }
@@ -345,10 +360,12 @@
 
 <div id="level-counter"></div>
 
-<div id="level-label">LEVEL 1</div>
-<div id="timer">07:00</div>
-<div id="blinds">100 / 200</div>
-<div id="next">NEXT: 200 / 400</div>
+<main id="timer-stage">
+  <div id="level-label">LEVEL 1</div>
+  <div id="timer">07:00</div>
+  <div id="blinds">100 / 200</div>
+  <div id="next">NEXT: 200 / 400</div>
+</main>
 
 <div id="controls">
   <div class="controls-row">
