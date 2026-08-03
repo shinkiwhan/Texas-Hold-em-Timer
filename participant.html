@@ -46,6 +46,7 @@
       <div class="count-label">현재 바인 횟수</div>
       <button id="rebuy-btn">리바인</button>
       <button id="refresh-btn" class="secondary">정보 새로고침</button>
+      <button id="leave-btn" class="secondary">게임 나가기</button>
     </div>
     <div id="status">게임 방을 확인하고 있어요…</div>
   </section>
@@ -72,6 +73,13 @@ function showPlayer() {
   $('player-name').textContent = player.name;
   $('buyin-count').textContent = player.buyin;
   status('중앙 화면과 연결됨');
+}
+function showJoin(message) {
+  player = null;
+  $('player-view').style.display = 'none';
+  $('join-view').style.display = 'block';
+  $('nickname').value = '';
+  status(message);
 }
 async function fetchPlayer(userId) {
   const { data, error } = await db.from('poker_players').select('*').eq('room_id', room.id).eq('user_id', userId).maybeSingle();
@@ -102,6 +110,15 @@ async function init() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'poker_players', filter: `room_id=eq.${room.id}` }, payload => {
         const changed = payload.new;
         if (changed && player && changed.id === player.id) { player = changed; showPlayer(); }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'poker_players' }, payload => {
+        if (player && Number(payload.old?.id) === Number(player.id)) {
+          showJoin('게임 방이 종료되었거나 참가 등록이 취소되었습니다.');
+        }
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'poker_rooms', filter: `id=eq.${room.id}` }, () => {
+        room.is_open = false;
+        showJoin('중앙에서 게임 방을 종료했습니다.');
       }).subscribe();
   } catch (error) { status(`연결 실패: ${error.message}`, true); }
 }
@@ -137,6 +154,17 @@ $('rebuy-btn').addEventListener('click', async () => {
 $('refresh-btn').addEventListener('click', async () => {
   try { const { data } = await db.auth.getUser(); await fetchPlayer(data.user.id); }
   catch (error) { status(`새로고침 실패: ${error.message}`, true); }
+});
+$('leave-btn').addEventListener('click', async () => {
+  if (!player || !confirm('이 게임에서 나갈까요?\n현재 참가 정보와 바인 기록이 삭제됩니다.')) return;
+  $('leave-btn').disabled = true;
+  try {
+    const leavingId = player.id;
+    const { error } = await db.from('poker_players').delete().eq('id', leavingId);
+    if (error) throw error;
+    showJoin('게임에서 나왔습니다. 같은 방에 다시 참가할 수 있습니다.');
+  } catch (error) { status(`나가기 실패: ${error.message}`, true); }
+  finally { $('leave-btn').disabled = false; }
 });
 init();
 </script>

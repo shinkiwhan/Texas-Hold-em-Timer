@@ -305,13 +305,20 @@
   }
   #room-actions { display: flex; gap: 6px; }
   #btn-create-room { flex: 1; padding: 9px; min-height: 38px; font-size: 13px; background: #172554; border-color: #29458a; }
+  #active-room-actions { display: none; gap: 6px; margin-top: 8px; }
+  #active-room-actions button { flex: 1; min-height: 36px; padding: 7px; font-size: 12px; }
+  #btn-show-qr { background: #1a3a1a; border-color: #336633; }
+  #btn-end-room { background: #3b1717; border-color: #713333; }
   #room-status { color: #888; font-size: 12px; line-height: 1.45; margin-top: 7px; overflow-wrap: anywhere; }
   #room-status.connected { color: #4ade80; }
-  #room-share { display: none; margin-top: 10px; text-align: center; }
+  #room-share { display: none; position: fixed; inset: 0; z-index: 500; background: rgba(0,0,0,.78); align-items: center; justify-content: center; padding: 24px; }
+  #room-share.open { display: flex; }
+  #qr-dialog { width: min(360px, 92vw); background: #141414; border: 1px solid #444; border-radius: 16px; padding: 22px; text-align: center; box-shadow: 0 24px 80px #000; }
   #room-code { color: #facc15; font-size: 20px; font-weight: 800; letter-spacing: .18em; }
   #qr-code { width: 148px; height: 148px; margin: 10px auto; padding: 8px; background: white; border-radius: 8px; }
   #qr-code img, #qr-code canvas { width: 100% !important; height: 100% !important; }
   #join-url { color: #888; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
+  #btn-close-qr { width: 100%; margin-top: 14px; padding: 9px; min-height: 40px; }
 
   @media (max-width: 600px) {
     #players-panel { width: 260px; max-width: 70vw; padding: 10px; }
@@ -356,10 +363,17 @@
   <div id="online-room">
     <div id="room-actions"><button id="btn-create-room">온라인 게임 방 만들기</button></div>
     <div id="room-status">Supabase 연결 설정을 확인하는 중…</div>
+    <div id="active-room-actions">
+      <button id="btn-show-qr">QR 참가</button>
+      <button id="btn-end-room">방 종료</button>
+    </div>
     <div id="room-share">
-      <div id="room-code"></div>
-      <div id="qr-code"></div>
-      <div id="join-url"></div>
+      <div id="qr-dialog">
+        <div id="room-code"></div>
+        <div id="qr-code"></div>
+        <div id="join-url"></div>
+        <button id="btn-close-qr">닫기</button>
+      </div>
     </div>
   </div>
   <div id="chip-config">
@@ -811,6 +825,7 @@ const $roomShare = document.getElementById('room-share');
 const $roomCode = document.getElementById('room-code');
 const $joinUrl = document.getElementById('join-url');
 const $createRoom = document.getElementById('btn-create-room');
+const $activeRoomActions = document.getElementById('active-room-actions');
 
 function onlineConfigured() {
   const cfg = window.POKER_CONFIG || {};
@@ -833,12 +848,12 @@ function participantUrl(code) {
 }
 function displayRoom(room) {
   const url = participantUrl(room.code);
-  $roomShare.style.display = 'block';
   $roomCode.textContent = `ROOM ${room.code}`;
   $joinUrl.textContent = url;
   document.getElementById('qr-code').innerHTML = '';
   if (window.QRCode) new QRCode(document.getElementById('qr-code'), { text: url, width: 132, height: 132 });
-  $createRoom.textContent = '새 게임 방 만들기';
+  document.getElementById('room-actions').style.display = 'none';
+  $activeRoomActions.style.display = 'flex';
   const localWarning = location.protocol === 'file:' ? ' · 현재 로컬 파일 주소라 QR 참가 불가, 웹 배포 필요' : '';
   setRoomStatus(`온라인 연결됨 · 참가자 ${players.length}명${localWarning}`, true);
 }
@@ -894,8 +909,34 @@ async function createOnlineRoom() {
     }
     if (!created) throw new Error('방 코드 생성에 실패했습니다. 다시 시도해주세요.');
     await useRoom(created);
+    showQrDialog();
   } catch (error) { setRoomStatus(`방 생성 실패: ${error.message}`); }
   finally { $createRoom.disabled = false; }
+}
+function showQrDialog() {
+  if (onlineRoom) $roomShare.classList.add('open');
+}
+function closeQrDialog() {
+  $roomShare.classList.remove('open');
+}
+async function endOnlineRoom() {
+  if (!onlineRoom || !confirm(`ROOM ${onlineRoom.code}를 종료할까요?\n참가자 명단도 함께 삭제됩니다.`)) return;
+  document.getElementById('btn-end-room').disabled = true;
+  try {
+    const { error } = await onlineDb.from('poker_rooms').delete().eq('id', onlineRoom.id);
+    if (error) throw error;
+    if (onlineChannel) { await onlineDb.removeChannel(onlineChannel); onlineChannel = null; }
+    onlineRoom = null;
+    players = [];
+    localStorage.removeItem('poker_online_room');
+    closeQrDialog();
+    $activeRoomActions.style.display = 'none';
+    document.getElementById('room-actions').style.display = 'flex';
+    $createRoom.textContent = '온라인 게임 방 만들기';
+    renderPlayers();
+    setRoomStatus('방이 종료되었습니다. 새 게임 방을 만들 수 있습니다.');
+  } catch (error) { setRoomStatus(`방 종료 실패: ${error.message}`); }
+  finally { document.getElementById('btn-end-room').disabled = false; }
 }
 async function initOnlineRoom() {
   if (!onlineConfigured()) {
@@ -921,6 +962,10 @@ async function initOnlineRoom() {
   } catch (error) { setRoomStatus(`온라인 연결 실패: ${error.message}`); }
 }
 $createRoom.addEventListener('click', createOnlineRoom);
+document.getElementById('btn-show-qr').addEventListener('click', showQrDialog);
+document.getElementById('btn-close-qr').addEventListener('click', closeQrDialog);
+document.getElementById('btn-end-room').addEventListener('click', endOnlineRoom);
+$roomShare.addEventListener('click', e => { if (e.target === $roomShare) closeQrDialog(); });
 initOnlineRoom();
 
 // 시간 조정 (분/초 감소·증가)
