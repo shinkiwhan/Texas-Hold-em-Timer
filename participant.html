@@ -122,10 +122,19 @@ function applyRoom(nextRoom) {
   renderRoomTimer();
   if (!roomTimerInterval) roomTimerInterval = setInterval(renderRoomTimer, 100);
 }
+function clearRoomTimer() {
+  if (roomTimerInterval) clearInterval(roomTimerInterval);
+  roomTimerInterval = null;
+  $('tournament-state').style.display = 'none';
+  $('mobile-level').textContent = 'LEVEL 1';
+  $('mobile-timer').textContent = '07:00';
+  $('mobile-blinds').textContent = '100 / 200';
+}
 async function refreshRoomState() {
   if (!db || !room?.id) return;
   const { data } = await db.from('poker_rooms').select('*').eq('id', room.id).maybeSingle();
   if (data) applyRoom(data);
+  else clearRoomTimer();
 }
 function showPlayer() {
   $('join-view').style.display = 'none';
@@ -178,6 +187,7 @@ async function init() {
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'poker_rooms', filter: `id=eq.${room.id}` }, () => {
         room.is_open = false;
+        clearRoomTimer();
         showJoin('중앙에서 게임 방을 종료했습니다.');
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'poker_rooms', filter: `id=eq.${room.id}` }, payload => {

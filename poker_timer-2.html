@@ -1086,6 +1086,7 @@ async function endOnlineRoom() {
     if (onlineChannel) { await onlineDb.removeChannel(onlineChannel); onlineChannel = null; }
     onlineRoom = null;
     players = [];
+    reset();
     localStorage.removeItem('poker_online_room');
     closeQrDialog();
     $activeRoomActions.style.display = 'none';
