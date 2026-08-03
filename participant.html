@@ -100,6 +100,9 @@ function blindNumber(stage) {
 function rebuyOpen() {
   return room && Number(room.current_level || 0) <= Number(room.rebuy_until_stage ?? 4);
 }
+function rebuyLimitReached() {
+  return player && room?.max_rebuys != null && Math.max(0, Number(player.buyin) - 1) >= Number(room.max_rebuys);
+}
 function renderRoomTimer() {
   if (!room) return;
   const stage = Math.min(LEVELS.length - 1, Math.max(0, Number(room.current_level) || 0));
@@ -111,10 +114,15 @@ function renderRoomTimer() {
   $('mobile-level').textContent = level.type === 'break' ? 'BREAK TIME' : `LEVEL ${blindNumber(stage)}`;
   $('mobile-blinds').textContent = level.type === 'break' ? '☕ 휴식 ☕' : `${fmt(level.sb)} / ${fmt(level.bb)}`;
   const open = rebuyOpen();
-  $('rebuy-state').textContent = open ? `리바인 가능 · 레벨 ${blindNumber(Number(room.rebuy_until_stage ?? 4))} 종료까지` : '리바인 마감';
-  $('rebuy-state').classList.toggle('closed', !open);
-  $('rebuy-btn').disabled = !open;
-  $('rebuy-btn').textContent = open ? '리바인' : '리바인 마감';
+  const limited = rebuyLimitReached();
+  const used = player ? Math.max(0, Number(player.buyin) - 1) : 0;
+  const limitText = room.max_rebuys == null ? '횟수 무제한' : `${used}/${room.max_rebuys}회`;
+  $('rebuy-state').textContent = !open
+    ? '리바인 마감'
+    : limited ? `리바인 한도 도달 · ${limitText}` : `리바인 가능 · ${limitText} · 레벨 ${blindNumber(Number(room.rebuy_until_stage ?? 4))} 종료까지`;
+  $('rebuy-state').classList.toggle('closed', !open || limited);
+  $('rebuy-btn').disabled = !open || limited;
+  $('rebuy-btn').textContent = !open ? '리바인 마감' : (limited ? '리바인 한도 도달' : '리바인');
   $('tournament-state').style.display = 'block';
 }
 function applyRoom(nextRoom) {
@@ -141,6 +149,7 @@ function showPlayer() {
   $('player-view').style.display = 'block';
   $('player-name').textContent = player.name;
   $('buyin-count').textContent = player.buyin;
+  renderRoomTimer();
   status('중앙 화면과 연결됨');
 }
 function showJoin(message) {
@@ -215,6 +224,7 @@ $('join-btn').addEventListener('click', async () => {
 $('nickname').addEventListener('keydown', e => { if (e.key === 'Enter') $('join-btn').click(); });
 $('rebuy-btn').addEventListener('click', async () => {
   if (!rebuyOpen()) return status('리바인 마감 레벨이 지났습니다.', true);
+  if (rebuyLimitReached()) return status('설정된 리바인 최대 횟수에 도달했습니다.', true);
   if (!player || !confirm(`리바인할까요?\n확인하면 바인 횟수가 ${player.buyin + 1}회가 됩니다.`)) return;
   $('rebuy-btn').disabled = true;
   try {
