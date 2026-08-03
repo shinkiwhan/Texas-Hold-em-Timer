@@ -1,0 +1,39 @@
+name: Supabase keepalive
+
+on:
+  schedule:
+    # 매일 03:17 UTC (한국 시간 12:17)에 실행합니다.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Send lightweight database activity
+        shell: bash
+        run: |
+          SUPABASE_URL=$(sed -n "s/.*supabaseUrl: '\([^']*\)'.*/\1/p" supabase-config.js)
+          SUPABASE_KEY=$(sed -n "s/.*supabaseAnonKey: '\([^']*\)'.*/\1/p" supabase-config.js)
+
+          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_KEY" ]]; then
+            echo "Supabase configuration was not found."
+            exit 1
+          fi
+
+          for attempt in 1 2 3; do
+            curl --fail --silent --show-error \
+              --request POST \
+              "$SUPABASE_URL/rest/v1/rpc/keepalive_poker_project" \
+              --header "apikey: $SUPABASE_KEY" \
+              --header "Authorization: Bearer $SUPABASE_KEY" \
+              --header "Content-Type: application/json" \
+              --data '{}'
+            echo
+          done

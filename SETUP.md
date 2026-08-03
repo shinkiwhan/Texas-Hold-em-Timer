@@ -36,3 +36,5 @@ GitHub Pages, Cloudflare Pages, Netlify, Vercel 같은 정적 호스팅을 사�
 이 저장소는 Supabase CLI 프로젝트와 연결되어 있습니다. 이후 DB 변경은 `supabase/migrations`에 새 마이그레이션을 추가한 뒤 `npx supabase@latest db push`로 적용합니다. GitHub `main` 브랜치에 푸시하면 GitHub Pages가 자동으로 다시 배포됩니다.
 
 현재 온라인 기능에는 타이머 상태 복구, 장시간 경과 보정, 원자적 리바인, 최근 리바인 취소, 블라인드가 표시되는 리바인 마감 레벨, 1인당 리바인 횟수 제한, 중앙 참가·리바인 알림, 참가자 실시간 타이머가 포함됩니다. 생성 후 12시간이 지난 게임 방은 Supabase 예약 작업이 자동으로 삭제합니다.
+
+`.github/workflows/supabase-keepalive.yml`은 매일 한국 시간 12시 17분에 읽기 수준의 가벼운 DB 요청을 보내 무료 프로젝트의 비활성 일시중지 가능성을 낮춥니다. 데이터 행은 생성하거나 수정하지 않습니다. GitHub Actions 화면에서 수동 실행할 수도 있습니다.
