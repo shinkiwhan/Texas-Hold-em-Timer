@@ -16,6 +16,7 @@
 
 - `poker_timer-2.html`: 중앙 타이머 화면
 - `participant.html`: 참가자 모바일 화면
+- `poker-core.js`: 중앙·참가자 공통 블라인드 및 타이머 규칙
 - `supabase-config.js`: Supabase 공개 연결 설정
 
 GitHub Pages, Cloudflare Pages, Netlify, Vercel 같은 정적 호스팅을 사용할 수 있습니다. QR코드는 중앙 화면의 현재 웹 주소를 기준으로 만들어지므로 `file://`로 직접 연 상태에서는 휴대폰 참가가 불가능합니다.
@@ -40,6 +41,10 @@ GitHub Pages, Cloudflare Pages, Netlify, Vercel 같은 정적 호스팅을 사�
 새 게임 방을 만들면 QR 화면에 관리자 PIN 6자리가 표시됩니다. 중앙 기기를 바꿔야 할 때 `방 복구`에서 방 코드와 PIN을 입력하면 새 기기로 관리 권한이 이전됩니다. PIN은 공개 채팅이나 참가자 QR에 포함하지 마세요.
 
 중앙과 참가자 타이머는 Supabase 서버 시각을 여러 번 측정한 뒤 가장 지연이 낮은 값을 기준으로 보정합니다. 네트워크 왕복 지연이 1초를 넘으면 부정확한 보정 대신 기기의 자동 시각을 사용합니다.
+
+관리자 PIN으로 다른 기기에서 방을 복구하면 기존 중앙 화면은 권한 이전을 실시간으로 감지하고 타이머·명단·리바인 설정을 자동으로 잠급니다. 블라인드 구조와 시간 계산은 `poker-core.js` 하나를 양쪽 화면이 함께 사용하며, `node --test tests/*.test.cjs`로 핵심 규칙을 확인할 수 있습니다. GitHub Actions도 push와 pull request마다 같은 테스트를 실행합니다.
+
+Supabase 예약 작업은 완료된 cron 실행 이력을 7일간만 보관합니다. 방 및 참가자 기록과 연결되지 않은 익명 로그인 계정은 생성 30일 후 정리되며, 오래된 브라우저 세션은 다음 접속 때 새 익명 계정으로 자동 복구됩니다.
 
 `.github/workflows/supabase-keepalive.yml`은 매일 한국 시간 12시 17분에 읽기 수준의 가벼운 DB 요청을 보내 무료 프로젝트의 비활성 일시중지 가능성을 낮춥니다. 데이터 행은 생성하거나 수정하지 않습니다. GitHub Actions 화면에서 수동 실행할 수도 있습니다.
 

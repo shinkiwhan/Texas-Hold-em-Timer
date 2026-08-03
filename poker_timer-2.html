@@ -309,6 +309,7 @@
   #btn-recover-room { background: #262626; border-color: #555; }
   #active-room-actions { display: none; gap: 6px; margin-top: 8px; }
   #active-room-actions button { flex: 1; min-height: 36px; padding: 7px; font-size: 12px; }
+  body.admin-locked .admin-control { opacity: .45; cursor: not-allowed; }
   #btn-show-qr { background: #1a3a1a; border-color: #336633; }
   #btn-end-room { background: #3b1717; border-color: #713333; }
   .room-setting { display: none; align-items: center; gap: 7px; margin-top: 8px; color: #aaa; font-size: 12px; }
@@ -443,26 +444,9 @@
 <script src="./vendor/supabase-js.min.js"></script>
 <script src="./vendor/qrcode.min.js"></script>
 <script src="./supabase-config.js"></script>
+<script src="./poker-core.js"></script>
 <script>
-const LEVELS = [
-  { type: 'blind', sb: 100,   bb: 200,    minutes: 7 },
-  { type: 'blind', sb: 200,   bb: 400,    minutes: 7 },
-  { type: 'blind', sb: 300,   bb: 600,    minutes: 7 },
-  { type: 'blind', sb: 400,   bb: 800,    minutes: 7 },
-  { type: 'blind', sb: 500,   bb: 1000,   minutes: 7 },
-  { type: 'break', minutes: 5 },
-  { type: 'blind', sb: 1000,  bb: 2000,   minutes: 7 },
-  { type: 'blind', sb: 2000,  bb: 4000,   minutes: 7 },
-  { type: 'blind', sb: 3000,  bb: 6000,   minutes: 7 },
-  { type: 'blind', sb: 4000,  bb: 8000,   minutes: 7 },
-  { type: 'blind', sb: 7000,  bb: 14000,  minutes: 7 },
-  { type: 'break', minutes: 5 },
-  { type: 'blind', sb: 10000, bb: 20000,  minutes: 7 },
-  { type: 'blind', sb: 20000, bb: 40000,  minutes: 7 },
-  { type: 'blind', sb: 30000, bb: 60000,  minutes: 7 },
-  { type: 'blind', sb: 40000, bb: 80000,  minutes: 7 },
-  { type: 'blind', sb: 50000, bb: 100000, minutes: 7 },
-];
+const LEVELS = PokerCore.LEVELS;
 
 let currentLevel = 0;
 let remainingMs = LEVELS[0].minutes * 60 * 1000;
@@ -483,9 +467,7 @@ const $btnStart = document.getElementById('btn-start');
 function fmt(n) { return n.toLocaleString('en-US'); }
 
 function getBlindNumber(idx) {
-  let n = 0;
-  for (let i = 0; i <= idx; i++) if (LEVELS[i].type === 'blind') n++;
-  return n;
+  return PokerCore.blindNumber(idx);
 }
 
 function findNextBlind(idx) {
@@ -506,7 +488,7 @@ function saveTimerState(syncOnline = true) {
     savedAt: clockNow(),
   };
   try { localStorage.setItem('poker_timer_state', JSON.stringify(state)); } catch (e) {}
-  if (syncOnline && onlineRoom) syncRoomTimer();
+  if (syncOnline && onlineRoom && isRoomOwner) syncRoomTimer();
 }
 
 function loadTimerState() {
@@ -528,15 +510,10 @@ function updateRunningUi() {
 }
 
 function advanceExpiredLevels(now = clockNow()) {
-  let advanced = false;
-  let overdue = Math.max(0, -remainingMs);
-  while (remainingMs <= 0 && currentLevel < LEVELS.length - 1) {
-    currentLevel++;
-    advanced = true;
-    remainingMs = LEVELS[currentLevel].minutes * 60 * 1000 - overdue;
-    overdue = Math.max(0, -remainingMs);
-  }
-  if (remainingMs <= 0 && currentLevel === LEVELS.length - 1) {
+  const result = PokerCore.advanceExpired(currentLevel, remainingMs);
+  currentLevel = result.currentLevel;
+  remainingMs = result.remainingMs;
+  if (result.finished) {
     running = false;
     endTime = null;
     remainingMs = 0;
@@ -545,9 +522,9 @@ function advanceExpiredLevels(now = clockNow()) {
   } else if (running) {
     endTime = now + remainingMs;
   }
-  if (advanced) lastDisplayedSec = -1;
+  if (result.advanced) lastDisplayedSec = -1;
   updateRunningUi();
-  return advanced;
+  return result.advanced > 0;
 }
 
 function tick() {
@@ -609,6 +586,7 @@ function render(total) {
 }
 
 function start() {
+  if (onlineRoom && !isRoomOwner) return;
   if (running) return;
   unlockAudio(); // 모바일 오디오 잠금 해제
   running = true;
@@ -622,6 +600,7 @@ function start() {
   saveTimerState();
 }
 function pause() {
+  if (onlineRoom && !isRoomOwner) return;
   if (!running) return;
   remainingMs = Math.max(0, endTime - clockNow());
   running = false;
@@ -636,6 +615,7 @@ function pause() {
 function toggle() { running ? pause() : start(); }
 
 function goNext() {
+  if (onlineRoom && !isRoomOwner) return;
   if (currentLevel < LEVELS.length - 1) {
     currentLevel++;
     remainingMs = LEVELS[currentLevel].minutes * 60 * 1000;
@@ -650,6 +630,7 @@ function goNext() {
   saveTimerState();
 }
 function goPrev() {
+  if (onlineRoom && !isRoomOwner) return;
   if (currentLevel > 0) currentLevel--;
   remainingMs = LEVELS[currentLevel].minutes * 60 * 1000;
   if (running) endTime = clockNow() + remainingMs;
@@ -658,6 +639,7 @@ function goPrev() {
   saveTimerState();
 }
 function reset() {
+  if (onlineRoom && !isRoomOwner) return;
   pause();
   currentLevel = 0;
   remainingMs = LEVELS[0].minutes * 60 * 1000;
@@ -760,6 +742,8 @@ let remoteNameTimer = null;
 let eventToastTimer = null;
 let roomSyncTimer = null;
 let adminPin = null;
+let onlineUserId = null;
+let isRoomOwner = true;
 
 const $playersList = document.getElementById('players-list');
 const $playersCount = document.getElementById('players-count');
@@ -806,7 +790,7 @@ function renderPlayers() {
   $playersCount.textContent = players.length;
   const addButton = document.getElementById('btn-add-player');
   if (addButton) {
-    addButton.disabled = players.length >= 9;
+    addButton.disabled = players.length >= 9 || (onlineRoom && !isRoomOwner);
     addButton.textContent = players.length >= 9 ? '최대 9명 참가 중' : '+ 플레이어 추가';
   }
   const totalBuyins = players.reduce((sum, p) => sum + (p.buyin || 0), 0);
@@ -840,10 +824,12 @@ function renderPlayers() {
     `;
     $playersList.appendChild(row);
   });
+  setAdminControls();
   savePlayers();
 }
 
 async function addPlayer() {
+  if (onlineRoom && !isRoomOwner) return;
   if (players.length >= 9) {
     alert('참가자는 최대 9명까지 등록할 수 있습니다.');
     return;
@@ -866,6 +852,7 @@ async function addPlayer() {
 }
 
 $playersList.addEventListener('click', async (e) => {
+  if (onlineRoom && !isRoomOwner) return;
   const btn = e.target.closest('button');
   if (!btn) return;
   const id = parseInt(btn.dataset.id);
@@ -887,6 +874,7 @@ $playersList.addEventListener('click', async (e) => {
   renderPlayers();
 });
 $playersList.addEventListener('input', (e) => {
+  if (onlineRoom && !isRoomOwner) return;
   if (e.target.classList.contains('name')) {
     const id = parseInt(e.target.dataset.id);
     const p = players.find(x => x.id === id);
@@ -964,6 +952,27 @@ function setRoomStatus(message, connected = false) {
   $roomStatus.textContent = message;
   $roomStatus.classList.toggle('connected', connected);
 }
+function setAdminControls() {
+  const locked = Boolean(onlineRoom && !isRoomOwner);
+  document.body.classList.toggle('admin-locked', locked);
+  const ids = [
+    'btn-start', 'btn-prev', 'btn-next', 'btn-reset',
+    'btn-minus-min', 'btn-plus-min', 'btn-minus-sec', 'btn-plus-sec',
+    'btn-add-player', 'chip-first', 'chip-rebuy', 'rebuy-cutoff',
+    'rebuy-limit', 'btn-end-room'
+  ];
+  ids.forEach(id => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.disabled = locked || (id === 'btn-add-player' && players.length >= 9);
+      element.classList.toggle('admin-control', locked);
+    }
+  });
+  $playersList.querySelectorAll('button,input').forEach(element => {
+    element.disabled = locked;
+    element.classList.toggle('admin-control', locked);
+  });
+}
 function randomRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const bytes = crypto.getRandomValues(new Uint8Array(6));
@@ -1022,6 +1031,21 @@ async function deleteOnlinePlayer(id) {
 function subscribeRoom() {
   if (onlineChannel) onlineDb.removeChannel(onlineChannel);
   onlineChannel = onlineDb.channel(`room-${onlineRoom.id}`)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'poker_rooms', filter: `id=eq.${onlineRoom.id}` }, payload => {
+      onlineRoom = payload.new;
+      const wasOwner = isRoomOwner;
+      isRoomOwner = onlineRoom.owner_id === onlineUserId;
+      applyRoomTimer(onlineRoom);
+      setAdminControls();
+      if (wasOwner && !isRoomOwner) {
+        clearTimeout(roomSyncTimer);
+        adminPin = null;
+        $adminPin.textContent = '관리자 PIN은 현재 관리자 기기에만 표시됩니다';
+        const saved = JSON.parse(localStorage.getItem('poker_online_room') || 'null');
+        if (saved) localStorage.setItem('poker_online_room', JSON.stringify({ id: saved.id, code: saved.code, pin: null }));
+        setRoomStatus('관리 권한이 다른 기기로 이전되었습니다. 이 화면의 관리 기능은 잠겼습니다.', true);
+      }
+    })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'poker_players', filter: `room_id=eq.${onlineRoom.id}` }, () => fetchOnlinePlayers())
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'poker_events', filter: `room_id=eq.${onlineRoom.id}` }, payload => handleNewEvent(payload.new))
     .subscribe(state => {
@@ -1039,7 +1063,7 @@ function timerRoomPayload() {
   };
 }
 function syncRoomTimer() {
-  if (!onlineRoom || !onlineDb) return;
+  if (!onlineRoom || !onlineDb || !isRoomOwner) return;
   clearTimeout(roomSyncTimer);
   roomSyncTimer = setTimeout(async () => {
     const payload = timerRoomPayload();
@@ -1092,9 +1116,11 @@ async function undoRebuy(eventId) {
 }
 async function useRoom(room, pin = adminPin) {
   onlineRoom = room;
+  isRoomOwner = room.owner_id === onlineUserId;
   adminPin = pin || null;
   localStorage.setItem('poker_online_room', JSON.stringify({ id: room.id, code: room.code, pin: adminPin }));
   applyRoomTimer(room);
+  setAdminControls();
   subscribeRoom();
   await fetchOnlinePlayers();
 }
@@ -1152,6 +1178,7 @@ function closeQrDialog() {
   $roomShare.classList.remove('open');
 }
 async function endOnlineRoom() {
+  if (!isRoomOwner) return;
   if (!onlineRoom || !confirm(`ROOM ${onlineRoom.code}를 종료할까요?\n참가자 명단도 함께 삭제됩니다.`)) return;
   document.getElementById('btn-end-room').disabled = true;
   try {
@@ -1159,6 +1186,7 @@ async function endOnlineRoom() {
     if (error) throw error;
     if (onlineChannel) { await onlineDb.removeChannel(onlineChannel); onlineChannel = null; }
     onlineRoom = null;
+    isRoomOwner = true;
     adminPin = null;
     players = [];
     reset();
@@ -1184,11 +1212,14 @@ async function initOnlineRoom() {
   try {
     const cfg = window.POKER_CONFIG;
     onlineDb = supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
-    const { data: existing } = await onlineDb.auth.getSession();
-    if (!existing.session) {
-      const { error } = await onlineDb.auth.signInAnonymously();
+    let { data: userData, error: userError } = await onlineDb.auth.getUser();
+    if (userError || !userData.user) {
+      await onlineDb.auth.signOut({ scope: 'local' });
+      const { data: auth, error } = await onlineDb.auth.signInAnonymously();
       if (error) throw error;
+      userData = { user: auth.user };
     }
+    onlineUserId = userData.user.id;
     await calibrateServerClock();
     $createRoom.disabled = false;
     setRoomStatus('연결 준비 완료 · 게임 방을 만들어주세요.');
@@ -1205,14 +1236,14 @@ document.getElementById('btn-show-qr').addEventListener('click', showQrDialog);
 document.getElementById('btn-close-qr').addEventListener('click', closeQrDialog);
 document.getElementById('btn-end-room').addEventListener('click', endOnlineRoom);
 $rebuyCutoff.addEventListener('change', async () => {
-  if (!onlineRoom) return;
+  if (!onlineRoom || !isRoomOwner) return;
   const value = Number($rebuyCutoff.value);
   const { error } = await onlineDb.from('poker_rooms').update({ rebuy_until_stage: value, updated_at: new Date().toISOString() }).eq('id', onlineRoom.id);
   if (error) setRoomStatus(`리바인 마감 저장 실패: ${error.message}`);
   else onlineRoom.rebuy_until_stage = value;
 });
 $rebuyLimit.addEventListener('change', async () => {
-  if (!onlineRoom) return;
+  if (!onlineRoom || !isRoomOwner) return;
   const value = $rebuyLimit.value === '' ? null : Number($rebuyLimit.value);
   const { error } = await onlineDb.from('poker_rooms').update({ max_rebuys: value, updated_at: new Date().toISOString() }).eq('id', onlineRoom.id);
   if (error) setRoomStatus(`리바인 제한 저장 실패: ${error.message}`);
@@ -1223,6 +1254,7 @@ initOnlineRoom();
 
 // 시간 조정 (분/초 감소·증가)
 function adjustTime(deltaMs) {
+  if (onlineRoom && !isRoomOwner) return;
   remainingMs += deltaMs;
   if (remainingMs < 1000) remainingMs = 1000; // 최소 1초는 남겨둡니다 (0이 되면 자동 레벨업 트리거)
   if (running) endTime = clockNow() + remainingMs;
