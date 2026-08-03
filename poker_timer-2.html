@@ -304,7 +304,9 @@
     margin-bottom: 10px;
   }
   #room-actions { display: flex; gap: 6px; }
-  #btn-create-room { flex: 1; padding: 9px; min-height: 38px; font-size: 13px; background: #172554; border-color: #29458a; }
+  #room-actions button { flex: 1; padding: 9px; min-height: 38px; font-size: 13px; }
+  #btn-create-room { background: #172554; border-color: #29458a; }
+  #btn-recover-room { background: #262626; border-color: #555; }
   #active-room-actions { display: none; gap: 6px; margin-top: 8px; }
   #active-room-actions button { flex: 1; min-height: 36px; padding: 7px; font-size: 12px; }
   #btn-show-qr { background: #1a3a1a; border-color: #336633; }
@@ -317,6 +319,7 @@
   #room-share.open { display: flex; }
   #qr-dialog { width: min(360px, 92vw); background: #141414; border: 1px solid #444; border-radius: 16px; padding: 22px; text-align: center; box-shadow: 0 24px 80px #000; }
   #room-code { color: #facc15; font-size: 20px; font-weight: 800; letter-spacing: .18em; }
+  #admin-pin { margin-top: 7px; color: #60a5fa; font-size: 14px; font-weight: 700; letter-spacing: .12em; }
   #qr-code { width: 148px; height: 148px; margin: 10px auto; padding: 8px; background: white; border-radius: 8px; }
   #qr-code img, #qr-code canvas { width: 100% !important; height: 100% !important; }
   #join-url { color: #888; font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; user-select: text; -webkit-user-select: text; }
@@ -367,7 +370,10 @@
 
 <div id="players-panel">
   <div id="online-room">
-    <div id="room-actions"><button id="btn-create-room">온라인 게임 방 만들기</button></div>
+    <div id="room-actions">
+      <button id="btn-create-room">새 게임 방</button>
+      <button id="btn-recover-room">방 복구</button>
+    </div>
     <div id="room-status">Supabase 연결 설정을 확인하는 중…</div>
     <div id="active-room-actions">
       <button id="btn-show-qr">QR 참가</button>
@@ -399,6 +405,7 @@
     <div id="room-share">
       <div id="qr-dialog">
         <div id="room-code"></div>
+        <div id="admin-pin"></div>
         <div id="qr-code"></div>
         <div id="join-url"></div>
         <button id="btn-close-qr">닫기</button>
@@ -433,8 +440,8 @@
 <button id="btn-fullscreen">⛶ 전체화면</button>
 <div id="event-toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script src="./vendor/supabase-js.min.js"></script>
+<script src="./vendor/qrcode.min.js"></script>
 <script src="./supabase-config.js"></script>
 <script>
 const LEVELS = [
@@ -462,6 +469,9 @@ let remainingMs = LEVELS[0].minutes * 60 * 1000;
 let endTime = null; // 절대 시간 기준 (화면 꺼져도 정확)
 let running = false;
 let intervalId = null;
+let serverClockOffsetMs = 0;
+
+function clockNow() { return Date.now() + serverClockOffsetMs; }
 
 const $timer = document.getElementById('timer');
 const $blinds = document.getElementById('blinds');
@@ -490,10 +500,10 @@ let lastDisplayedSec = -1;
 function saveTimerState(syncOnline = true) {
   const state = {
     currentLevel,
-    remainingMs: running && endTime != null ? Math.max(0, endTime - Date.now()) : remainingMs,
+    remainingMs: running && endTime != null ? Math.max(0, endTime - clockNow()) : remainingMs,
     endTime,
     running,
-    savedAt: Date.now(),
+    savedAt: clockNow(),
   };
   try { localStorage.setItem('poker_timer_state', JSON.stringify(state)); } catch (e) {}
   if (syncOnline && onlineRoom) syncRoomTimer();
@@ -507,7 +517,7 @@ function loadTimerState() {
     running = Boolean(state.running);
     endTime = running && Number.isFinite(state.endTime) ? state.endTime : null;
     remainingMs = running && endTime != null
-      ? endTime - Date.now()
+      ? endTime - clockNow()
       : Math.max(0, Number(state.remainingMs) || 0);
   } catch (e) {}
 }
@@ -517,7 +527,7 @@ function updateRunningUi() {
   $btnStart.classList.toggle('running', running);
 }
 
-function advanceExpiredLevels(now = Date.now()) {
+function advanceExpiredLevels(now = clockNow()) {
   let advanced = false;
   let overdue = Math.max(0, -remainingMs);
   while (remainingMs <= 0 && currentLevel < LEVELS.length - 1) {
@@ -542,7 +552,7 @@ function advanceExpiredLevels(now = Date.now()) {
 
 function tick() {
   if (running && endTime != null) {
-    remainingMs = endTime - Date.now();
+    remainingMs = endTime - clockNow();
     if (remainingMs <= 0) {
       // 레벨업 사운드
       beep(880, 0.15);
@@ -602,7 +612,7 @@ function start() {
   if (running) return;
   unlockAudio(); // 모바일 오디오 잠금 해제
   running = true;
-  endTime = Date.now() + remainingMs;
+  endTime = clockNow() + remainingMs;
   $btnStart.textContent = '⏸ 일시정지';
   $btnStart.classList.add('running');
   keepAwake();
@@ -613,7 +623,7 @@ function start() {
 }
 function pause() {
   if (!running) return;
-  remainingMs = Math.max(0, endTime - Date.now());
+  remainingMs = Math.max(0, endTime - clockNow());
   running = false;
   endTime = null;
   $btnStart.textContent = '▶ 재개';
@@ -629,7 +639,7 @@ function goNext() {
   if (currentLevel < LEVELS.length - 1) {
     currentLevel++;
     remainingMs = LEVELS[currentLevel].minutes * 60 * 1000;
-    if (running) endTime = Date.now() + remainingMs;
+    if (running) endTime = clockNow() + remainingMs;
   } else {
     pause();
     remainingMs = 0;
@@ -642,7 +652,7 @@ function goNext() {
 function goPrev() {
   if (currentLevel > 0) currentLevel--;
   remainingMs = LEVELS[currentLevel].minutes * 60 * 1000;
-  if (running) endTime = Date.now() + remainingMs;
+  if (running) endTime = clockNow() + remainingMs;
   lastDisplayedSec = -1;
   render();
   saveTimerState();
@@ -749,6 +759,7 @@ let onlineChannel = null;
 let remoteNameTimer = null;
 let eventToastTimer = null;
 let roomSyncTimer = null;
+let adminPin = null;
 
 const $playersList = document.getElementById('players-list');
 const $playersCount = document.getElementById('players-count');
@@ -919,8 +930,10 @@ renderPlayers();
 const $roomStatus = document.getElementById('room-status');
 const $roomShare = document.getElementById('room-share');
 const $roomCode = document.getElementById('room-code');
+const $adminPin = document.getElementById('admin-pin');
 const $joinUrl = document.getElementById('join-url');
 const $createRoom = document.getElementById('btn-create-room');
+const $recoverRoom = document.getElementById('btn-recover-room');
 const $activeRoomActions = document.getElementById('active-room-actions');
 const $rebuySetting = document.getElementById('rebuy-setting');
 const $rebuyCutoff = document.getElementById('rebuy-cutoff');
@@ -933,6 +946,20 @@ function onlineConfigured() {
   return cfg.supabaseUrl && cfg.supabaseAnonKey &&
     !cfg.supabaseUrl.includes('YOUR_PROJECT') && !cfg.supabaseAnonKey.includes('YOUR_');
 }
+async function calibrateServerClock() {
+  let best = null;
+  for (let i = 0; i < 5; i++) {
+    const started = Date.now();
+    const { data, error } = await onlineDb.rpc('poker_server_time_ms');
+    const finished = Date.now();
+    if (!error && Number.isFinite(Number(data))) {
+      const sample = { rtt: finished - started, offset: Number(data) - ((started + finished) / 2) };
+      if (!best || sample.rtt < best.rtt) best = sample;
+    }
+  }
+  // 왕복 지연이 크면 오히려 오차가 커질 수 있으므로 기기 자동 시각을 사용합니다.
+  serverClockOffsetMs = best && best.rtt <= 1000 ? best.offset : 0;
+}
 function setRoomStatus(message, connected = false) {
   $roomStatus.textContent = message;
   $roomStatus.classList.toggle('connected', connected);
@@ -942,6 +969,10 @@ function randomRoomCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(6));
   return Array.from(bytes, b => chars[b % chars.length]).join('');
 }
+function randomAdminPin() {
+  const value = crypto.getRandomValues(new Uint32Array(1))[0] % 1000000;
+  return String(value).padStart(6, '0');
+}
 function participantUrl(code) {
   const url = new URL('participant.html', location.href);
   url.search = new URLSearchParams({ room: code }).toString();
@@ -950,6 +981,7 @@ function participantUrl(code) {
 function displayRoom(room) {
   const url = participantUrl(room.code);
   $roomCode.textContent = `ROOM ${room.code}`;
+  $adminPin.textContent = adminPin ? `관리자 PIN ${adminPin}` : '관리자 PIN은 생성 기기에 저장됨';
   $joinUrl.textContent = url;
   document.getElementById('qr-code').innerHTML = '';
   if (window.QRCode) new QRCode(document.getElementById('qr-code'), { text: url, width: 132, height: 132 });
@@ -997,7 +1029,7 @@ function subscribeRoom() {
     });
 }
 function timerRoomPayload() {
-  const liveRemaining = running && endTime != null ? Math.max(0, endTime - Date.now()) : Math.max(0, remainingMs);
+  const liveRemaining = running && endTime != null ? Math.max(0, endTime - clockNow()) : Math.max(0, remainingMs);
   return {
     current_level: currentLevel,
     timer_running: running,
@@ -1022,7 +1054,7 @@ function applyRoomTimer(room) {
   running = Boolean(room.timer_running);
   endTime = running && room.timer_ends_at ? new Date(room.timer_ends_at).getTime() : null;
   remainingMs = running && endTime != null
-    ? endTime - Date.now()
+    ? endTime - clockNow()
     : Math.max(0, Number(room.timer_remaining_ms) || LEVELS[currentLevel].minutes * 60000);
   if (running) {
     advanceExpiredLevels();
@@ -1058,9 +1090,10 @@ async function undoRebuy(eventId) {
     $eventToast.classList.remove('show');
   }
 }
-async function useRoom(room) {
+async function useRoom(room, pin = adminPin) {
   onlineRoom = room;
-  localStorage.setItem('poker_online_room', JSON.stringify({ id: room.id, code: room.code }));
+  adminPin = pin || null;
+  localStorage.setItem('poker_online_room', JSON.stringify({ id: room.id, code: room.code, pin: adminPin }));
   applyRoomTimer(room);
   subscribeRoom();
   await fetchOnlinePlayers();
@@ -1074,23 +1107,43 @@ async function createOnlineRoom() {
     const { data: userData, error: userError } = await onlineDb.auth.getUser();
     if (userError) throw userError;
     let created = null;
+    const pin = randomAdminPin();
     for (let attempt = 0; attempt < 4 && !created; attempt++) {
-      const { data, error } = await onlineDb.from('poker_rooms')
-        .insert({
-          code: randomRoomCode(),
-          owner_id: userData.user.id,
-          rebuy_until_stage: Number($rebuyCutoff.value),
-          max_rebuys: $rebuyLimit.value === '' ? null : Number($rebuyLimit.value),
-          ...timerRoomPayload(),
-        }).select().single();
+      const timer = timerRoomPayload();
+      const { data, error } = await onlineDb.rpc('create_poker_room_with_pin', {
+        p_code: randomRoomCode(),
+        p_pin: pin,
+        p_rebuy_until_stage: Number($rebuyCutoff.value),
+        p_max_rebuys: $rebuyLimit.value === '' ? null : Number($rebuyLimit.value),
+        p_current_level: timer.current_level,
+        p_timer_running: timer.timer_running,
+        p_timer_ends_at: timer.timer_ends_at,
+        p_timer_remaining_ms: timer.timer_remaining_ms,
+      });
       if (!error) created = data;
       else if (error.code !== '23505') throw error;
     }
     if (!created) throw new Error('방 코드 생성에 실패했습니다. 다시 시도해주세요.');
-    await useRoom(created);
+    await useRoom(created, pin);
     showQrDialog();
   } catch (error) { setRoomStatus(`방 생성 실패: ${error.message}`); }
   finally { $createRoom.disabled = false; }
+}
+async function recoverOnlineRoom() {
+  if (!onlineDb) return;
+  const code = prompt('복구할 6자리 방 코드를 입력하세요.')?.trim().toUpperCase();
+  if (!code) return;
+  const pin = prompt('방 생성 시 표시된 관리자 PIN 6자리를 입력하세요.')?.trim();
+  if (!pin) return;
+  $recoverRoom.disabled = true;
+  setRoomStatus('게임 방 관리 권한을 복구하는 중…');
+  try {
+    const { data, error } = await onlineDb.rpc('recover_poker_room', { p_code: code, p_pin: pin });
+    if (error) throw error;
+    await useRoom(data, pin);
+    showQrDialog();
+  } catch (error) { setRoomStatus(`방 복구 실패: ${error.message}`); }
+  finally { $recoverRoom.disabled = false; }
 }
 function showQrDialog() {
   if (onlineRoom) $roomShare.classList.add('open');
@@ -1106,6 +1159,7 @@ async function endOnlineRoom() {
     if (error) throw error;
     if (onlineChannel) { await onlineDb.removeChannel(onlineChannel); onlineChannel = null; }
     onlineRoom = null;
+    adminPin = null;
     players = [];
     reset();
     localStorage.removeItem('poker_online_room');
@@ -1114,7 +1168,7 @@ async function endOnlineRoom() {
     $rebuySetting.style.display = 'none';
     $rebuyLimitSetting.style.display = 'none';
     document.getElementById('room-actions').style.display = 'flex';
-    $createRoom.textContent = '온라인 게임 방 만들기';
+    $createRoom.textContent = '새 게임 방';
     renderPlayers();
     setRoomStatus('방이 종료되었습니다. 새 게임 방을 만들 수 있습니다.');
   } catch (error) { setRoomStatus(`방 종료 실패: ${error.message}`); }
@@ -1124,6 +1178,7 @@ async function initOnlineRoom() {
   if (!onlineConfigured()) {
     setRoomStatus('온라인 참가 미설정 · supabase-config.js에 프로젝트 정보를 입력하세요.');
     $createRoom.disabled = true;
+    $recoverRoom.disabled = true;
     return;
   }
   try {
@@ -1134,16 +1189,18 @@ async function initOnlineRoom() {
       const { error } = await onlineDb.auth.signInAnonymously();
       if (error) throw error;
     }
+    await calibrateServerClock();
     $createRoom.disabled = false;
     setRoomStatus('연결 준비 완료 · 게임 방을 만들어주세요.');
     const saved = JSON.parse(localStorage.getItem('poker_online_room') || 'null');
     if (saved?.id) {
       const { data } = await onlineDb.from('poker_rooms').select('*').eq('id', saved.id).maybeSingle();
-      if (data) await useRoom(data);
+      if (data) await useRoom(data, saved.pin || null);
     }
   } catch (error) { setRoomStatus(`온라인 연결 실패: ${error.message}`); }
 }
 $createRoom.addEventListener('click', createOnlineRoom);
+$recoverRoom.addEventListener('click', recoverOnlineRoom);
 document.getElementById('btn-show-qr').addEventListener('click', showQrDialog);
 document.getElementById('btn-close-qr').addEventListener('click', closeQrDialog);
 document.getElementById('btn-end-room').addEventListener('click', endOnlineRoom);
@@ -1168,7 +1225,7 @@ initOnlineRoom();
 function adjustTime(deltaMs) {
   remainingMs += deltaMs;
   if (remainingMs < 1000) remainingMs = 1000; // 최소 1초는 남겨둡니다 (0이 되면 자동 레벨업 트리거)
-  if (running) endTime = Date.now() + remainingMs;
+  if (running) endTime = clockNow() + remainingMs;
   lastDisplayedSec = -1;
   render();
   saveTimerState();
