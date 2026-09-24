@@ -13,8 +13,15 @@ test('central creates and restores rooms by mode', () => {
   assert.match(central, /restoreTimerSnapshot/);
 });
 
-test.todo('both screens resolve levels through shared mode profiles', () => {
+test('both screens resolve levels through shared mode profiles', () => {
   assert.match(central, /PokerCore\.getMode/);
   assert.match(participant, /PokerCore\.getMode/);
   assert.doesNotMatch(participant, /const LEVELS\s*=\s*\[/);
+});
+
+test('participant displays and applies the room mode', () => {
+  assert.match(participant, /id="mobile-mode"/);
+  assert.match(participant, /const profile = PokerCore\.getMode\(room\.mode\)/);
+  assert.match(participant, /profile\.levels/);
+  assert.match(participant, /profile\.label/);
 });

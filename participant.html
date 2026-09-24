@@ -28,6 +28,7 @@
   #status.error { color: #f87171; }
   #room-label { color: #71717a; margin-top: 24px; text-align: center; font-size: 13px; }
   #tournament-state { display: none; margin-bottom: 14px; padding: 16px 18px; background: #111114; border: 1px solid #29292e; border-radius: 16px; text-align: center; }
+  #mobile-mode { margin-bottom: 7px; color: #fbbf24; font-size: 12px; font-weight: 800; }
   #mobile-level { color: #a1a1aa; font-size: 13px; font-weight: 800; letter-spacing: .14em; }
   #mobile-timer { margin: 3px 0; font-size: 50px; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
   #mobile-blinds { font-size: 20px; font-weight: 700; }
@@ -41,6 +42,7 @@
   <h1>게임 참가</h1>
   <p class="sub">닉네임으로 참가한 뒤, 이 화면에서 직접 리바인할 수 있어요.</p>
   <section id="tournament-state">
+    <div id="mobile-mode">데일리 · 블라인드 7분</div>
     <div id="mobile-level">LEVEL 1</div>
     <div id="mobile-timer">07:00</div>
     <div id="mobile-blinds">100 / 200</div>
@@ -75,7 +77,6 @@ const $ = id => document.getElementById(id);
 let db, room, player, channel;
 let roomTimerInterval = null;
 let serverClockOffsetMs = 0;
-const LEVELS = PokerCore.LEVELS;
 
 function configured() {
   return config.supabaseUrl && config.supabaseAnonKey && !config.supabaseUrl.includes('YOUR_PROJECT') && !config.supabaseAnonKey.includes('YOUR_');
@@ -99,8 +100,8 @@ async function calibrateServerClock() {
   }
   serverClockOffsetMs = best && best.rtt <= 1000 ? best.offset : 0;
 }
-function blindNumber(stage) {
-  return PokerCore.blindNumber(stage);
+function blindNumber(stage, levels) {
+  return PokerCore.blindNumber(stage, levels);
 }
 function rebuyOpen() {
   return room && PokerCore.rebuyStatus({
@@ -120,12 +121,15 @@ function rebuyLimitReached() {
 }
 function renderRoomTimer() {
   if (!room) return;
-  const stage = Math.min(LEVELS.length - 1, Math.max(0, Number(room.current_level) || 0));
-  const level = LEVELS[stage];
+  const profile = PokerCore.getMode(room.mode);
+  const levels = profile.levels;
+  const stage = Math.min(levels.length - 1, Math.max(0, Number(room.current_level) || 0));
+  const level = levels[stage];
   let ms = Number(room.timer_remaining_ms) || level.minutes * 60000;
   if (room.timer_running && room.timer_ends_at) ms = Math.max(0, new Date(room.timer_ends_at).getTime() - clockNow());
+  $('mobile-mode').textContent = `${profile.label} · 블라인드 ${profile.blindMinutes}분`;
   $('mobile-timer').textContent = PokerCore.formatMs(ms);
-  $('mobile-level').textContent = level.type === 'break' ? 'BREAK TIME' : `LEVEL ${blindNumber(stage)}`;
+  $('mobile-level').textContent = level.type === 'break' ? 'BREAK TIME' : `LEVEL ${blindNumber(stage, levels)}`;
   $('mobile-blinds').textContent = level.type === 'break' ? '☕ 휴식 ☕' : `${fmt(level.sb)} / ${fmt(level.bb)}`;
   const open = rebuyOpen();
   const limited = rebuyLimitReached();
@@ -133,7 +137,7 @@ function renderRoomTimer() {
   const limitText = room.max_rebuys == null ? '횟수 무제한' : `${used}/${room.max_rebuys}회`;
   $('rebuy-state').textContent = !open
     ? '리바인 마감'
-    : limited ? `리바인 한도 도달 · ${limitText}` : `리바인 가능 · ${limitText} · 레벨 ${blindNumber(Number(room.rebuy_until_stage ?? 4))} 종료까지`;
+    : limited ? `리바인 한도 도달 · ${limitText}` : `리바인 가능 · ${limitText} · 레벨 ${blindNumber(Number(room.rebuy_until_stage ?? 4), levels)} 종료까지`;
   $('rebuy-state').classList.toggle('closed', !open || limited);
   $('rebuy-btn').disabled = !open || limited;
   $('rebuy-btn').textContent = !open ? '리바인 마감' : (limited ? '리바인 한도 도달' : '리바인');
@@ -148,6 +152,7 @@ function clearRoomTimer() {
   if (roomTimerInterval) clearInterval(roomTimerInterval);
   roomTimerInterval = null;
   $('tournament-state').style.display = 'none';
+  $('mobile-mode').textContent = '';
   $('mobile-level').textContent = 'LEVEL 1';
   $('mobile-timer').textContent = '07:00';
   $('mobile-blinds').textContent = '100 / 200';
