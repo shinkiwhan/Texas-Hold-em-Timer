@@ -26,6 +26,19 @@
         border-radius: 10px; font: inherit; font-size: 17px; outline: none;
       }
       .poker-dialog-input:focus { border-color: #fbbf24; box-shadow: 0 0 0 3px rgba(251,191,36,.14); }
+      .poker-dialog-choices { display: grid; gap: 10px; margin-top: 18px; }
+      .poker-dialog-choice {
+        width: 100%; min-height: 68px; margin: 0; padding: 12px 14px;
+        color: #fafafa; background: #27272a; border: 1px solid #52525b;
+        border-radius: 12px; text-align: left; cursor: pointer;
+      }
+      .poker-dialog-choice:hover, .poker-dialog-choice:focus-visible {
+        background: #1e3a5f; border-color: #60a5fa; outline: none;
+        box-shadow: 0 0 0 3px rgba(96,165,250,.15);
+      }
+      .poker-dialog-choice strong, .poker-dialog-choice span { display: block; }
+      .poker-dialog-choice strong { font-size: 17px; }
+      .poker-dialog-choice span { margin-top: 4px; color: #a1a1aa; font-size: 13px; font-weight: 500; }
       .poker-dialog-actions { display: flex; gap: 10px; margin-top: 20px; }
       .poker-dialog-actions button {
         flex: 1; width: auto; min-height: 46px; margin: 0; padding: 10px 14px;
@@ -47,7 +60,7 @@
     if (activeClose) activeClose(null);
     const config = Object.assign({
       title: '확인', message: '', confirmText: '확인', cancelText: '취소',
-      danger: false, cancelable: true, input: false,
+      danger: false, cancelable: true, input: false, choices: null,
     }, options || {});
 
     return new Promise(resolve => {
@@ -88,23 +101,44 @@
         dialog.appendChild(input);
       }
 
-      const actions = document.createElement('div');
-      actions.className = 'poker-dialog-actions';
-      if (config.cancelable) {
-        const cancel = document.createElement('button');
-        cancel.type = 'button';
-        cancel.className = 'poker-dialog-cancel';
-        cancel.textContent = config.cancelText;
-        cancel.addEventListener('click', () => close(null));
-        actions.appendChild(cancel);
+      let focusTarget = input;
+      if (Array.isArray(config.choices)) {
+        const choiceList = document.createElement('div');
+        choiceList.className = 'poker-dialog-choices';
+        config.choices.forEach(choice => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'poker-dialog-choice';
+          const label = document.createElement('strong');
+          label.textContent = choice.label;
+          const description = document.createElement('span');
+          description.textContent = choice.description;
+          button.append(label, description);
+          button.addEventListener('click', () => close(choice.value));
+          choiceList.appendChild(button);
+          if (!focusTarget) focusTarget = button;
+        });
+        dialog.appendChild(choiceList);
+      } else {
+        const actions = document.createElement('div');
+        actions.className = 'poker-dialog-actions';
+        if (config.cancelable) {
+          const cancel = document.createElement('button');
+          cancel.type = 'button';
+          cancel.className = 'poker-dialog-cancel';
+          cancel.textContent = config.cancelText;
+          cancel.addEventListener('click', () => close(null));
+          actions.appendChild(cancel);
+        }
+        const confirm = document.createElement('button');
+        confirm.type = 'button';
+        confirm.className = `poker-dialog-confirm${config.danger ? ' danger' : ''}`;
+        confirm.textContent = config.confirmText;
+        confirm.addEventListener('click', () => close(input ? input.value : true));
+        actions.appendChild(confirm);
+        dialog.appendChild(actions);
+        if (!focusTarget) focusTarget = confirm;
       }
-      const confirm = document.createElement('button');
-      confirm.type = 'button';
-      confirm.className = `poker-dialog-confirm${config.danger ? ' danger' : ''}`;
-      confirm.textContent = config.confirmText;
-      confirm.addEventListener('click', () => close(input ? input.value : true));
-      actions.appendChild(confirm);
-      dialog.appendChild(actions);
       backdrop.appendChild(dialog);
 
       function onKeydown(event) {
@@ -125,7 +159,7 @@
       });
       document.addEventListener('keydown', onKeydown);
       document.body.appendChild(backdrop);
-      setTimeout(() => (input || confirm).focus(), 0);
+      setTimeout(() => focusTarget?.focus(), 0);
     });
   }
 
@@ -133,5 +167,6 @@
     confirm(options) { return open(Object.assign({}, options, { cancelable: true, input: false })).then(Boolean); },
     alert(options) { return open(Object.assign({}, options, { cancelable: false, input: false })).then(() => undefined); },
     prompt(options) { return open(Object.assign({}, options, { cancelable: true, input: true })); },
+    choose(options) { return open(Object.assign({}, options, { cancelable: true, input: false })); },
   });
 })(window);
