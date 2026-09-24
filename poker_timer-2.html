@@ -348,6 +348,7 @@
   .room-setting select { flex: 1; min-height: 32px; background: #181818; color: #fff; border: 1px solid #444; border-radius: 6px; padding: 4px 7px; }
   #room-status { color: #888; font-size: 12px; line-height: 1.45; margin-top: 7px; overflow-wrap: anywhere; }
   #room-status.connected { color: #4ade80; }
+  #room-mode { display: none; margin-top: 7px; color: #facc15; font-size: 12px; font-weight: 800; letter-spacing: .08em; }
   #room-share { display: none; position: fixed; inset: 0; z-index: 500; background: rgba(0,0,0,.78); align-items: center; justify-content: center; padding: 24px; }
   #room-share.open { display: flex; }
   #qr-dialog { width: min(360px, 92vw); background: #141414; border: 1px solid #444; border-radius: 16px; padding: 22px; text-align: center; box-shadow: 0 24px 80px #000; }
@@ -424,21 +425,13 @@
       <button id="btn-recover-room">방 복구</button>
     </div>
     <div id="room-status">Supabase 연결 설정을 확인하는 중…</div>
+    <div id="room-mode"></div>
     <div id="active-room-actions">
       <button id="btn-show-qr">QR 참가</button>
       <button id="btn-end-room">방 종료</button>
     </div>
     <label id="rebuy-setting" class="room-setting">리바인 마감
-      <select id="rebuy-cutoff">
-        <option value="0">레벨 1 종료 · 100 / 200</option><option value="1">레벨 2 종료 · 200 / 400</option>
-        <option value="2">레벨 3 종료 · 300 / 600</option><option value="3">레벨 4 종료 · 400 / 800</option>
-        <option value="4" selected>레벨 5 종료 · 500 / 1,000</option><option value="6">레벨 6 종료 · 1,000 / 2,000</option>
-        <option value="7">레벨 7 종료 · 2,000 / 4,000</option><option value="8">레벨 8 종료 · 3,000 / 6,000</option>
-        <option value="9">레벨 9 종료 · 4,000 / 8,000</option><option value="10">레벨 10 종료 · 7,000 / 14,000</option>
-        <option value="12">레벨 11 종료 · 10,000 / 20,000</option><option value="13">레벨 12 종료 · 20,000 / 40,000</option>
-        <option value="14">레벨 13 종료 · 30,000 / 60,000</option><option value="15">레벨 14 종료 · 40,000 / 80,000</option>
-        <option value="16">레벨 15 종료 · 50,000 / 100,000</option>
-      </select>
+      <select id="rebuy-cutoff"></select>
     </label>
     <label id="rebuy-limit-setting" class="room-setting">리바인 제한
       <select id="rebuy-limit">
@@ -495,7 +488,8 @@
 <script src="./poker-core.js"></script>
 <script src="./poker-dialog.js"></script>
 <script>
-const LEVELS = PokerCore.LEVELS;
+let activeMode = PokerCore.getMode('daily');
+let LEVELS = activeMode.levels;
 
 let currentLevel = 0;
 let remainingMs = LEVELS[0].minutes * 60 * 1000;
@@ -516,7 +510,7 @@ const $btnStart = document.getElementById('btn-start');
 function fmt(n) { return n.toLocaleString('en-US'); }
 
 function getBlindNumber(idx) {
-  return PokerCore.blindNumber(idx);
+  return PokerCore.blindNumber(idx, LEVELS);
 }
 
 function findNextBlind(idx) {
@@ -530,6 +524,7 @@ let lastDisplayedSec = -1;
 
 function saveTimerState(syncOnline = true) {
   const state = {
+    mode: activeMode.id,
     currentLevel,
     remainingMs: running && endTime != null ? Math.max(0, endTime - clockNow()) : remainingMs,
     endTime,
@@ -543,7 +538,9 @@ function saveTimerState(syncOnline = true) {
 function loadTimerState() {
   try {
     const state = JSON.parse(localStorage.getItem('poker_timer_state') || 'null');
-    if (!state || !Number.isInteger(state.currentLevel) || state.currentLevel < 0 || state.currentLevel >= LEVELS.length) return;
+    if (!state) return;
+    setActiveMode(state.mode || 'daily');
+    if (!Number.isInteger(state.currentLevel) || state.currentLevel < 0 || state.currentLevel >= LEVELS.length) return;
     currentLevel = state.currentLevel;
     running = Boolean(state.running);
     endTime = running && Number.isFinite(state.endTime) ? state.endTime : null;
@@ -559,7 +556,7 @@ function updateRunningUi() {
 }
 
 function advanceExpiredLevels(now = clockNow()) {
-  const result = PokerCore.advanceExpired(currentLevel, remainingMs);
+  const result = PokerCore.advanceExpired(currentLevel, remainingMs, LEVELS);
   currentLevel = result.currentLevel;
   remainingMs = result.remainingMs;
   if (result.finished) {
@@ -1007,6 +1004,7 @@ renderPlayers();
 
 // ===== 온라인 게임 방 / 실시간 참가 =====
 const $roomStatus = document.getElementById('room-status');
+const $roomMode = document.getElementById('room-mode');
 const $roomShare = document.getElementById('room-share');
 const $roomCode = document.getElementById('room-code');
 const $adminPin = document.getElementById('admin-pin');
@@ -1019,6 +1017,62 @@ const $rebuyCutoff = document.getElementById('rebuy-cutoff');
 const $rebuyLimitSetting = document.getElementById('rebuy-limit-setting');
 const $rebuyLimit = document.getElementById('rebuy-limit');
 const $eventToast = document.getElementById('event-toast');
+
+function buildRebuyCutoffOptions(preferredStage = Number($rebuyCutoff.value)) {
+  $rebuyCutoff.innerHTML = '';
+  LEVELS.forEach((level, stage) => {
+    if (level.type !== 'blind') return;
+    const option = document.createElement('option');
+    option.value = String(stage);
+    option.textContent = `레벨 ${PokerCore.blindNumber(stage, LEVELS)} 종료 · ${fmt(level.sb)} / ${fmt(level.bb)}`;
+    $rebuyCutoff.appendChild(option);
+  });
+  const valid = [...$rebuyCutoff.options].some(option => Number(option.value) === preferredStage);
+  $rebuyCutoff.value = String(valid ? preferredStage : 4);
+}
+
+function setActiveMode(modeId, resetTimer = false) {
+  activeMode = PokerCore.getMode(modeId);
+  LEVELS = activeMode.levels;
+  if (resetTimer) {
+    if (intervalId) { clearInterval(intervalId); intervalId = null; }
+    running = false;
+    endTime = null;
+    currentLevel = 0;
+    remainingMs = LEVELS[0].minutes * 60000;
+    lastDisplayedSec = -1;
+    releaseAwake();
+  }
+  buildRebuyCutoffOptions(resetTimer ? 4 : Number($rebuyCutoff.value));
+  updateRunningUi();
+  render();
+}
+
+function captureTimerSnapshot() {
+  return {
+    mode: activeMode.id,
+    currentLevel,
+    remainingMs: running && endTime != null ? Math.max(0, endTime - clockNow()) : remainingMs,
+    endTime,
+    running,
+  };
+}
+
+function restoreTimerSnapshot(snapshot) {
+  if (intervalId) { clearInterval(intervalId); intervalId = null; }
+  setActiveMode(snapshot.mode);
+  currentLevel = snapshot.currentLevel;
+  remainingMs = snapshot.remainingMs;
+  running = snapshot.running;
+  endTime = running ? snapshot.endTime : null;
+  if (running) {
+    intervalId = setInterval(tick, 100);
+    keepAwake();
+  }
+  updateRunningUi();
+  render();
+  saveTimerState(false);
+}
 
 function onlineConfigured() {
   const cfg = window.POKER_CONFIG || {};
@@ -1091,6 +1145,8 @@ function displayRoom(room) {
   $rebuyLimitSetting.style.display = 'flex';
   $rebuyCutoff.value = String(room.rebuy_until_stage ?? 4);
   $rebuyLimit.value = room.max_rebuys == null ? '' : String(room.max_rebuys);
+  $roomMode.style.display = 'block';
+  $roomMode.textContent = `${activeMode.label} 모드 · 블라인드 ${activeMode.blindMinutes}분`;
   const localWarning = location.protocol === 'file:' ? ' · 현재 로컬 파일 주소라 QR 참가 불가, 웹 배포 필요' : '';
   setRoomStatus(`온라인 연결됨 · 참가자 ${players.length}명${localWarning}`, true);
 }
@@ -1124,6 +1180,7 @@ function subscribeRoom() {
   onlineChannel = onlineDb.channel(`room-${onlineRoom.id}`)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'poker_rooms', filter: `id=eq.${onlineRoom.id}` }, payload => {
       onlineRoom = payload.new;
+      setActiveMode(onlineRoom.mode || 'daily');
       const wasOwner = isRoomOwner;
       isRoomOwner = onlineRoom.owner_id === onlineUserId;
       applyRoomTimer(onlineRoom);
@@ -1210,6 +1267,7 @@ async function useRoom(room, pin = adminPin) {
   isRoomOwner = room.owner_id === onlineUserId;
   adminPin = pin || null;
   localStorage.setItem('poker_online_room', JSON.stringify({ id: room.id, code: room.code, pin: adminPin }));
+  setActiveMode(room.mode || 'daily');
   applyRoomTimer(room);
   setAdminControls();
   subscribeRoom();
@@ -1225,6 +1283,17 @@ async function createOnlineRoom() {
     });
     if (!confirmed) return;
   }
+  const selectedMode = await PokerDialog.choose({
+    title: '게임 모드를 선택하세요',
+    message: '방을 만든 뒤에는 모드를 변경할 수 없습니다.',
+    choices: [
+      { value: 'daily', label: '데일리', description: '블라인드 7분 · 현재 스트럭처' },
+      { value: 'satellite', label: '새틀라이트', description: '블라인드 10분 · 5레벨마다 5분 휴식' },
+    ],
+  });
+  if (!selectedMode) return;
+  const previousTimer = captureTimerSnapshot();
+  setActiveMode(selectedMode, true);
   $createRoom.disabled = true;
   setRoomStatus('새 게임 방을 만드는 중…');
   try {
@@ -1237,6 +1306,7 @@ async function createOnlineRoom() {
       const { data, error } = await onlineDb.rpc('create_poker_room_with_pin', {
         p_code: randomRoomCode(),
         p_pin: pin,
+        p_mode: selectedMode,
         p_rebuy_until_stage: Number($rebuyCutoff.value),
         p_max_rebuys: $rebuyLimit.value === '' ? null : Number($rebuyLimit.value),
         p_current_level: timer.current_level,
@@ -1250,7 +1320,10 @@ async function createOnlineRoom() {
     if (!created) throw new Error('방 코드 생성에 실패했습니다. 다시 시도해주세요.');
     await useRoom(created, pin);
     showQrDialog();
-  } catch (error) { setRoomStatus(`방 생성 실패: ${error.message}`); }
+  } catch (error) {
+    restoreTimerSnapshot(previousTimer);
+    setRoomStatus(`방 생성 실패: ${error.message}`);
+  }
   finally { $createRoom.disabled = false; }
 }
 async function recoverOnlineRoom() {
@@ -1315,6 +1388,7 @@ async function endOnlineRoom() {
     $activeRoomActions.style.display = 'none';
     $rebuySetting.style.display = 'none';
     $rebuyLimitSetting.style.display = 'none';
+    $roomMode.style.display = 'none';
     document.getElementById('room-actions').style.display = 'flex';
     $createRoom.textContent = '새 게임 방';
     renderPlayers();
@@ -1387,6 +1461,7 @@ document.getElementById('btn-plus-min').addEventListener('click', () => adjustTi
 document.getElementById('btn-minus-sec').addEventListener('click', () => adjustTime(-10 * 1000));
 document.getElementById('btn-plus-sec').addEventListener('click', () => adjustTime(+10 * 1000));
 
+buildRebuyCutoffOptions(4);
 loadTimerState();
 updateRunningUi();
 if (running) {
