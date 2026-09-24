@@ -1,29 +1,29 @@
-# Tournament Modes Design
+# 토너먼트 모드 설계
 
-## Goal
+## 목표
 
-Add two immutable tournament modes selected when a new online room is created:
+온라인 게임 방을 만들 때 다음 두 가지 토너먼트 모드 중 하나를 선택할 수 있게 한다.
 
-- **Daily**: preserve the current 7-minute blind structure exactly.
-- **Satellite**: use 10-minute blind levels, no ante, and a chip-friendly structure whose big blind rises by roughly 20–50% per level. Insert a 5-minute break after every five blind levels.
+- **데일리 모드**: 현재 사용 중인 7분 블라인드 구조를 그대로 유지한다.
+- **새틀라이트 모드**: 블라인드 레벨은 10분으로 고정한다. 앤티는 사용하지 않으며, 빅블라인드가 이전 레벨보다 약 20~50%씩 오르는 계산하기 편한 구조를 사용한다. 블라인드 5레벨마다 5분 휴식을 넣는다.
 
-The central timer, participant page, room recovery, rebuy cutoff controls, and persisted timer state must all use the room's selected mode.
+중앙 타이머, 참가자 화면, 방 복구, 리바인 마감 설정, 저장된 타이머 상태가 모두 해당 방에서 선택한 모드를 기준으로 동작해야 한다.
 
-## User Flow
+## 이용 흐름
 
-1. The administrator presses **새 게임 방**.
-2. A custom in-app dialog presents two large choices:
+1. 관리자가 **새 게임 방** 버튼을 누른다.
+2. 자체 팝업에서 다음 두 가지 선택지를 보여준다.
    - **데일리 · 7분**
    - **새틀라이트 · 10분**
-3. Selecting a mode creates the room immediately with that mode.
-4. The selected mode is displayed on the central room panel and participant page.
-5. The mode cannot be changed after room creation. The administrator must end the room and create another to choose a different mode.
+3. 모드를 선택하면 해당 모드로 방을 즉시 생성한다.
+4. 중앙 화면과 참가자 화면에 현재 모드를 표시한다.
+5. 방을 만든 뒤에는 모드를 변경할 수 없다. 다른 모드로 진행하려면 기존 방을 종료하고 새 방을 만들어야 한다.
 
-If the administrator already has an active room, the existing confirmation appears first. Mode selection follows only after confirmation.
+이미 활성화된 방이 있는 상태에서 새 게임 방을 만들려고 하면 기존 확인 팝업을 먼저 표시한다. 사용자가 새 방 생성을 확인한 경우에만 모드 선택 팝업을 이어서 보여준다.
 
-## Shared Mode Profiles
+## 공통 모드 프로필
 
-`poker-core.js` will expose immutable profiles instead of a single `LEVELS` array:
+현재 `poker-core.js`에 하나만 존재하는 `LEVELS` 배열을 모드별 프로필 구조로 변경한다.
 
 ```text
 PokerCore.MODES.daily
@@ -31,128 +31,121 @@ PokerCore.MODES.satellite
 PokerCore.getMode(modeId)
 ```
 
-Each profile contains:
+각 프로필에는 변경되지 않는 모드 ID, 화면에 표시할 한국어 이름, 블라인드 레벨 시간, 휴식을 포함한 전체 진행 단계가 들어간다. 모드 값이 없거나 알 수 없는 값이면 기존 방과의 호환성을 위해 데일리 모드로 처리한다.
 
-- stable `id`
-- Korean label
-- blind level duration
-- ordered stages including breaks
+### 데일리 모드
 
-Unknown or missing mode IDs resolve to `daily` for backward compatibility.
+현재 사용 중인 17단계 구조를 그대로 유지한다. 블라인드 레벨은 7분이며 기존의 5분 휴식도 변경하지 않는다.
 
-### Daily Profile
+### 새틀라이트 모드
 
-The current 17-stage structure remains unchanged, including 7-minute blind levels and its existing 5-minute breaks.
+모든 블라인드 레벨은 10분, 모든 휴식은 5분으로 한다. 앤티는 사용하지 않는다.
 
-### Satellite Profile
-
-All blind levels last 10 minutes. Breaks last 5 minutes. There is no ante.
-
-| Blind level | Small / Big blind |
+| 블라인드 레벨 | 스몰 / 빅 블라인드 |
 |---:|---:|
 | 1 | 100 / 200 |
 | 2 | 200 / 300 |
 | 3 | 200 / 400 |
 | 4 | 300 / 500 |
 | 5 | 300 / 600 |
-| Break | 5 minutes |
+| 휴식 | 5분 |
 | 6 | 400 / 800 |
 | 7 | 500 / 1,000 |
 | 8 | 600 / 1,200 |
 | 9 | 800 / 1,600 |
 | 10 | 1,000 / 2,000 |
-| Break | 5 minutes |
+| 휴식 | 5분 |
 | 11 | 1,200 / 2,400 |
 | 12 | 1,500 / 3,000 |
 | 13 | 2,000 / 4,000 |
 | 14 | 2,500 / 5,000 |
 | 15 | 3,000 / 6,000 |
-| Break | 5 minutes |
+| 휴식 | 5분 |
 | 16 | 4,000 / 8,000 |
 | 17 | 5,000 / 10,000 |
 | 18 | 6,000 / 12,000 |
 | 19 | 8,000 / 16,000 |
 | 20 | 10,000 / 20,000 |
-| Break | 5 minutes |
+| 휴식 | 5분 |
 | 21 | 12,000 / 24,000 |
 | 22 | 15,000 / 30,000 |
 | 23 | 20,000 / 40,000 |
 | 24 | 25,000 / 50,000 |
 | 25 | 30,000 / 60,000 |
-| Break | 5 minutes |
+| 휴식 | 5분 |
 | 26 | 40,000 / 80,000 |
 | 27 | 50,000 / 100,000 |
 | 28 | 60,000 / 120,000 |
 | 29 | 80,000 / 160,000 |
 | 30 | 100,000 / 200,000 |
 
-This progression follows the chip-friendly 1.2x–1.5x big-blind steps commonly seen in published tournament and satellite structures. It is a fixed profile rather than a runtime formula so both clients always show identical values.
+공개된 실제 대회와 새틀라이트 스트럭처에서 흔히 볼 수 있는 방식처럼, 빅블라인드가 약 1.2~1.5배씩 오르면서도 칩 계산이 쉬운 숫자가 되도록 구성한다. 실행 중 계산식으로 다음 블라인드를 만들지 않고 위 고정 구조를 사용하여 중앙 화면과 참가자 화면이 항상 동일한 값을 표시하도록 한다.
 
-## Central Timer Changes
+## 중앙 타이머 변경 사항
 
-- Replace the global fixed `LEVELS` reference with active mode/profile state.
-- Opening the new-room dialog does not reset the current timer. Selecting a mode resets the timer to that profile's first level as part of room creation.
-- Loading or recovering a room switches to its stored profile before applying `current_level` and remaining time.
-- Local saved timer state includes `mode`; old saved state defaults to `daily`.
-- Rebuy cutoff options are generated from blind stages in the active profile. Break stages are excluded, while option values continue to store the underlying stage index used by the database rule.
-- Display a compact mode badge in the online room area.
-- Starting, pausing, navigating, resetting, elapsed-level catch-up, and room termination retain their existing behavior.
+- 하나로 고정된 `LEVELS` 대신 현재 선택된 모드와 프로필을 사용한다.
+- 모드 선택 팝업을 여는 것만으로 현재 타이머를 초기화하지 않는다. 실제로 모드를 선택해 방을 만들 때 선택한 프로필의 첫 레벨로 초기화한다.
+- 방을 불러오거나 복구할 때 DB에 저장된 모드를 먼저 적용한 뒤 현재 레벨과 남은 시간을 복원한다.
+- 로컬에 저장하는 타이머 상태에도 `mode`를 포함한다. 기존 저장 데이터에 모드가 없으면 데일리 모드로 처리한다.
+- 리바인 마감 선택지는 현재 모드의 블라인드 레벨을 기준으로 자동 생성한다. 휴식 단계는 제외하지만 DB에는 전체 진행 단계의 위치값을 저장한다.
+- 온라인 방 영역에 현재 모드를 알아볼 수 있는 작은 표시를 추가한다.
+- 시작, 일시정지, 이전·다음 레벨 이동, 리셋, 장시간 경과 보정, 방 종료의 기존 동작은 유지한다.
 
-## Participant Changes
+## 참가자 화면 변경 사항
 
-- Select the profile from `room.mode` before rendering the current level.
-- Show the Korean mode label near the level/timer display.
-- Continue deriving remaining time from server timestamps.
-- Rebuy availability continues to compare the room's current stage index with its stored cutoff stage.
-- Existing rooms with no mode are treated as daily.
+- `room.mode`를 기준으로 해당 모드 프로필을 선택한 뒤 현재 레벨을 표시한다.
+- 레벨과 타이머 주변에 데일리 또는 새틀라이트 모드 이름을 표시한다.
+- 남은 시간은 지금처럼 Supabase 서버 시각을 기준으로 계산한다.
+- 리바인 가능 여부는 현재 진행 단계와 방에 저장된 마감 단계의 위치값을 비교하는 기존 방식을 유지한다.
+- 모드 정보가 없는 기존 방은 데일리 모드로 처리한다.
 
-## Dialog Changes
+## 모드 선택 팝업
 
-Extend `poker-dialog.js` with a choice dialog that accepts a list of labeled choices and returns the selected value or `null` when dismissed. It will reuse the existing overlay, focus restoration, outside-click cancellation, and Escape handling.
+`poker-dialog.js`에 여러 선택지를 표시하고 선택한 값을 돌려주는 선택형 팝업을 추가한다. 현재 팝업의 배경, 포커스 복원, 바깥 영역 클릭 취소, `Esc` 취소 동작을 그대로 재사용한다.
 
-The mode dialog will use descriptive buttons rather than a browser prompt:
+모드 선택지는 설명이 포함된 두 개의 큰 버튼으로 표시한다.
 
-- `데일리` with `블라인드 7분 · 현재 스트럭처`
-- `새틀라이트` with `블라인드 10분 · 완만한 표준 스트럭처`
+- **데일리** — `블라인드 7분 · 현재 스트럭처`
+- **새틀라이트** — `블라인드 10분 · 완만한 표준 스트럭처`
 
-## Database Changes
+## 데이터베이스 변경 사항
 
-Add a migration that:
+새 Supabase 마이그레이션에서 다음을 적용한다.
 
-1. Adds `poker_rooms.mode text not null default 'daily'` with a check constraint allowing only `daily` and `satellite`.
-2. Expands `current_level` and `rebuy_until_stage` constraints to permit the longer satellite profile. The supported stage range will be `0..63`, leaving room for future fixed profiles without another immediate constraint migration.
-3. Replaces `create_poker_room_with_pin` with a signature accepting `p_mode` and validates the supplied value.
-4. Revokes the old function signature and grants the new signature only to authenticated users.
+1. `poker_rooms` 테이블에 `mode text not null default 'daily'` 열을 추가한다. 값은 `daily` 또는 `satellite`만 허용한다.
+2. 더 긴 새틀라이트 구조를 저장할 수 있도록 `current_level`과 `rebuy_until_stage`의 허용 범위를 확장한다. 향후 고정 프로필 추가 시 곧바로 제약 조건을 다시 바꾸지 않도록 `0..63`을 허용한다.
+3. `create_poker_room_with_pin` 함수에 `p_mode` 인자를 추가하고 전달된 모드를 DB에서도 검증한다.
+4. 기존 함수 형태의 실행 권한을 제거하고 새 함수 형태는 로그인된 사용자만 실행할 수 있게 한다.
 
-Existing rows automatically become `daily`; no destructive data migration is required.
+기존 방은 새 열의 기본값에 의해 자동으로 데일리 모드가 된다. 기존 데이터를 삭제하거나 변환하는 작업은 없다.
 
-## Compatibility and Failure Handling
+## 호환성과 오류 처리
 
-- Missing, null, or unknown client-side mode values fall back to daily.
-- The database rejects unknown mode values.
-- A room is not created if the administrator dismisses mode selection.
-- If room creation fails after selecting a mode, the central timer restores its prior local mode and timer state rather than leaving a partially switched display.
-- A recovered room always wins over local saved mode.
+- 클라이언트에서 모드 값이 없거나 알 수 없는 값이면 데일리 모드로 처리한다.
+- DB는 허용되지 않은 모드 값을 거부한다.
+- 관리자가 모드 선택 팝업을 닫으면 방을 생성하지 않는다.
+- 모드를 선택한 뒤 방 생성이 실패하면 기존 로컬 모드와 타이머 상태를 복원한다. 화면이 선택한 모드로 일부만 바뀐 채 남지 않게 한다.
+- 복구한 방의 모드가 로컬에 저장된 모드보다 항상 우선한다.
 
-## Tests
+## 테스트
 
-Node tests will cover:
+Node 자동 테스트에서 다음을 검증한다.
 
-- both profiles exist and are immutable
-- daily profile is unchanged
-- every satellite blind duration is 10 minutes
-- a 5-minute break follows every five satellite blind levels except after the final group
-- satellite big-blind increases remain within 20–50%
-- shared blind numbering across breaks
-- elapsed multi-level catch-up against each profile
-- unknown mode fallback to daily
+- 두 모드 프로필이 존재하며 실행 중 변경할 수 없는 상태인지
+- 데일리 모드의 기존 구조가 바뀌지 않았는지
+- 새틀라이트의 모든 블라인드 레벨이 10분인지
+- 마지막 그룹을 제외하고 새틀라이트 블라인드 5레벨마다 5분 휴식이 들어가는지
+- 새틀라이트 빅블라인드 상승률이 20~50% 범위인지
+- 휴식 단계가 있어도 블라인드 레벨 번호가 올바른지
+- 각 모드에서 여러 레벨 시간이 한꺼번에 경과했을 때 올바른 단계로 이동하는지
+- 알 수 없는 모드가 데일리 모드로 처리되는지
 
-Static HTML checks will verify both pages load the shared mode/profile API and contain no duplicate blind structures. The migration will be applied to the linked Supabase project, then the deployed GitHub Pages assets and GitHub Actions result will be verified.
+HTML 정적 검사에서는 중앙 화면과 참가자 화면이 모두 공통 모드 API를 사용하며 자체적으로 중복된 블라인드 구조를 갖고 있지 않은지 확인한다. 이후 마이그레이션을 연결된 Supabase 프로젝트에 적용하고 GitHub Actions 테스트와 GitHub Pages 공개 배포 결과까지 확인한다.
 
-## Out of Scope
+## 이번 작업에 포함하지 않는 기능
 
-- BB ante or per-player ante
-- prize/ticket calculations or stopping automatically when a target number of seats remains
-- changing a room's mode after creation
-- custom user-authored structures
-- changing the existing daily structure
+- BB Ante 또는 일반 앤티
+- 상금·티켓 수 계산이나 목표 인원에 도달했을 때 자동 종료하는 기능
+- 방을 만든 뒤 모드를 변경하는 기능
+- 사용자가 직접 만드는 커스텀 스트럭처
+- 기존 데일리 모드 구조 변경
