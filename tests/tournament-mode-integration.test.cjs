@@ -14,6 +14,13 @@ test('central creates and restores rooms by mode', () => {
   assert.match(central, /restoreTimerSnapshot/);
 });
 
+test('mode chooser descriptions only show blind duration', () => {
+  assert.match(central, /description:\s*'블라인드 7분'/);
+  assert.match(central, /description:\s*'블라인드 10분'/);
+  assert.doesNotMatch(central, /현재 스트럭처/);
+  assert.doesNotMatch(central, /5레벨마다 5분 휴식/);
+});
+
 test('both screens resolve levels through shared mode profiles', () => {
   assert.match(central, /PokerCore\.getMode/);
   assert.match(participant, /PokerCore\.getMode/);
